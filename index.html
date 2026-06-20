@@ -215,7 +215,14 @@
   const DEFAULT_ITEM_NAMES = ["식사", "맥주", "소주"];
 
   function makeDefaultItems(){
-    return DEFAULT_ITEM_NAMES.map((name) => ({ id: uid(), name, price: 0, qty: 1, assignedTo: [] }));
+    const allMemberIds = state.members.map((m) => m.id);
+    return DEFAULT_ITEM_NAMES.map((name) => ({
+      id: uid(),
+      name,
+      price: 0,
+      qty: 1,
+      assignedTo: name === "식사" ? [...allMemberIds] : []
+    }));
   }
 
   function uid(){ return Math.random().toString(36).slice(2,9); }
