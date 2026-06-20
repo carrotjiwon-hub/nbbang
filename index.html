@@ -182,10 +182,14 @@
       <h1 class="text-[22px] font-extrabold mb-1">정산 결과</h1>
       <p class="text-sm text-[var(--toss-gray-500)] mb-5">각자 보낼 금액을 확인해주세요</p>
 
-      <div class="toss-card p-5 mb-5 text-center" style="background:linear-gradient(135deg,#3182f6,#1b64da)">
+      <div class="toss-card p-5 mb-3 text-center" style="background:linear-gradient(135deg,#3182f6,#1b64da)">
         <div class="text-white/80 text-xs font-semibold mb-1">총 결제 금액</div>
         <div id="dashTotal" class="text-white text-[28px] font-extrabold">0원</div>
       </div>
+
+      <button id="btnCopyAll" class="btn-secondary w-full py-3 text-[14px] mb-5">
+        📋 전체 정산내역 복사 <span class="text-[var(--toss-gray-500)] font-normal">(단톡방에 붙여넣기용)</span>
+      </button>
 
       <div id="settleList" class="space-y-3"></div>
     </section>
@@ -539,16 +543,14 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <button class="kakaoBtn chip" data-id="${m.id}" style="border-color:#fee500;background:#fee500;color:#191600">카카오</button>
-          <button class="tossBtn chip" data-id="${m.id}" style="border-color:#3182f6;background:#3182f6;color:#fff">토스</button>
+          <button class="copyOneBtn chip" data-id="${m.id}" style="border-color:#fee500;background:#fee500;color:#191600">개별 안내 복사</button>
           <button class="paidBtn chip ${paid ? "selected" : ""}" data-id="${m.id}" style="${paid ? "background:#00c781;border-color:#00c781;color:#fff" : ""}">${paid ? "완료 ✓" : "입금완료"}</button>
         </div>
       `;
       settleListEl.appendChild(row);
     });
 
-    $$(".kakaoBtn").forEach((btn) => btn.addEventListener("click", () => shareMessage(btn.dataset.id, "kakao")));
-    $$(".tossBtn").forEach((btn) => btn.addEventListener("click", () => shareMessage(btn.dataset.id, "toss")));
+    $$(".copyOneBtn").forEach((btn) => btn.addEventListener("click", () => copyIndividualMessage(btn.dataset.id)));
     $$(".paidBtn").forEach((btn) => btn.addEventListener("click", () => {
       if(!state.paidStatus) state.paidStatus = {};
       state.paidStatus[btn.dataset.id] = !state.paidStatus[btn.dataset.id];
@@ -557,26 +559,36 @@
     }));
   }
 
-  function shareMessage(memberId, channel){
+  // 개별 멤버에게 카톡으로 보낼 정산 안내 문구를 클립보드에 복사 (실제 발송 기능 아님)
+  function copyIndividualMessage(memberId){
     const member = state.members.find((m) => m.id === memberId);
     if(!member) return;
     const amount = (state.settlement && state.settlement[memberId]) || 0;
     const text = `[엔빵 정산] ${member.name}님, 정산 금액은 ${won(amount)} 입니다.`;
-
-    if(navigator.share){
-      navigator.share({ text }).catch(() => fallbackCopy(text, channel));
-    } else {
-      fallbackCopy(text, channel);
-    }
+    copyToClipboard(text, "개별 정산 안내 메시지가 복사되었어요. 카카오톡 채팅창에 붙여넣어 보내주세요!");
   }
 
-  function fallbackCopy(text, channel){
+  // 전체 멤버의 정산 내역을 하나의 메시지로 모아 클립보드에 복사 (단톡방 공유용)
+  function copyAllSettlementMessage(){
+    const { totals, grandTotal } = computeSettlement();
+    const lines = [
+      "[엔빵 정산 안내]",
+      `총 결제 금액: ${won(grandTotal)}`,
+      "",
+      ...state.members.map((m) => `- ${m.name}: ${won(totals[m.id] || 0)}`)
+    ];
+    copyToClipboard(lines.join("\n"), "전체 정산내역이 복사되었어요. 단톡방에 붙여넣어 공유해주세요!");
+  }
+
+  function copyToClipboard(text, successMessage){
     navigator.clipboard?.writeText(text).then(() => {
-      alert(`${channel === "kakao" ? "카카오톡" : "토스"}로 보낼 메시지가 복사되었어요:\n\n${text}`);
+      alert(`${successMessage}\n\n${text}`);
     }).catch(() => {
       alert(text);
     });
   }
+
+  $("#btnCopyAll").addEventListener("click", copyAllSettlementMessage);
 
   // ====================================================
   // 하단 고정 버튼 흐름 제어
