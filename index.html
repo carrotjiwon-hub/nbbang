@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>엔빵 - 영수증 정산</title>
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoi7JeU67mAIiwic2hvcnRfbmFtZSI6IuyXlOu5gCIsInN0YXJ0X3VybCI6Ii4iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjZjJmNGY2IiwidGhlbWVfY29sb3IiOiIjMzE4MmY2In0=" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  :root{
+    --toss-blue:#3182f6;
+    --toss-blue-dark:#1b64da;
+    --toss-bg:#f2f4f6;
+    --toss-gray-900:#191f28;
+    --toss-gray-700:#4e5968;
+    --toss-gray-500:#8b95a1;
+    --toss-gray-300:#e5e8eb;
+    --toss-gray-100:#f2f4f6;
+    --toss-red:#f04452;
+    --toss-green:#00c781;
+  }
+  *{ -webkit-tap-highlight-color: transparent; }
+  body{
+    background:var(--toss-bg);
+    color:var(--toss-gray-900);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard",Roboto,"Segoe UI",sans-serif;
+    overscroll-behavior:none;
+  }
+  .app-shell{
+    max-width:480px;
+    margin:0 auto;
+    min-height:100vh;
+    background:#fff;
+    position:relative;
+    box-shadow:0 0 24px rgba(0,0,0,0.06);
+    display:flex;
+    flex-direction:column;
+  }
+  .btn-primary{
+    background:var(--toss-blue);
+    color:#fff;
+    font-weight:700;
+    border-radius:14px;
+    transition:background .15s ease, transform .1s ease;
+  }
+  .btn-primary:active{ background:var(--toss-blue-dark); transform:scale(0.98); }
+  .btn-primary:disabled{ background:var(--toss-gray-300); color:var(--toss-gray-500); }
+  .btn-secondary{
+    background:var(--toss-gray-100);
+    color:var(--toss-gray-900);
+    font-weight:600;
+    border-radius:14px;
+  }
+  .btn-secondary:active{ background:var(--toss-gray-300); transform:scale(0.98); }
+  .toss-card{
+    background:#fff;
+    border-radius:16px;
+    box-shadow:0 2px 10px rgba(0,0,0,0.04);
+  }
+  .step-dot{
+    width:8px;height:8px;border-radius:50%;
+    background:var(--toss-gray-300);
+    transition:all .2s ease;
+  }
+  .step-dot.active{ background:var(--toss-blue); width:20px; border-radius:4px; }
+  .step-dot.done{ background:var(--toss-blue); }
+  .chip{
+    border-radius:20px;
+    padding:6px 14px;
+    font-size:13px;
+    font-weight:600;
+    border:1.5px solid var(--toss-gray-300);
+    color:var(--toss-gray-700);
+    transition:all .12s ease;
+  }
+  .chip.selected{
+    background:var(--toss-blue);
+    border-color:var(--toss-blue);
+    color:#fff;
+  }
+  .fade-in{ animation:fadeIn .25s ease; }
+  @keyframes fadeIn{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+  .bottom-fixed{
+    position:sticky;
+    bottom:0;
+    background:linear-gradient(to top, #fff 70%, rgba(255,255,255,0.85));
+    padding:12px 20px calc(16px + env(safe-area-inset-bottom));
+  }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0; }
+  .scroll-area{ overflow-y:auto; flex:1; }
+  .spinner{
+    width:36px;height:36px;border-radius:50%;
+    border:4px solid var(--toss-gray-300);
+    border-top-color:var(--toss-blue);
+    animation:spin 0.8s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .progress-bar-bg{ background:var(--toss-gray-100); border-radius:8px; height:8px; overflow:hidden; }
+  .progress-bar-fill{ background:var(--toss-blue); height:100%; border-radius:8px; transition:width .2s ease; }
+  .member-avatar{
+    width:34px;height:34px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:700; font-size:13px; color:#fff; flex-shrink:0;
+  }
+</style>
+</head>
+<body>
+
+<div id="app" class="app-shell">
+
+  <!-- 상단 헤더 -->
+  <header class="flex items-center justify-between px-5 py-4 sticky top-0 bg-white/95 backdrop-blur z-20" style="border-bottom:1px solid var(--toss-gray-100)">
+    <div class="flex items-center gap-2">
+      <button id="btnRestart" class="text-sm font-semibold text-[var(--toss-gray-500)] active:opacity-60" title="처음으로">↺ 처음으로</button>
+    </div>
+    <div class="text-[17px] font-extrabold tracking-tight">엔빵 🧾</div>
+    <button id="btnAddHome" class="text-sm font-semibold text-[var(--toss-blue)] active:opacity-60">홈추가</button>
+  </header>
+
+  <!-- Step 진행 상태 -->
+  <div class="flex items-center justify-center gap-2 py-4" id="stepDots">
+    <div class="step-dot active" data-step="1"></div>
+    <div class="step-dot" data-step="2"></div>
+    <div class="step-dot" data-step="3"></div>
+    <div class="step-dot" data-step="4"></div>
+  </div>
+
+  <main class="scroll-area px-5">
+
+    <!-- Step 1: 인원 입력 -->
+    <section id="step1" class="fade-in">
+      <h1 class="text-[22px] font-extrabold mb-1">누구랑 나눠 낼까요?</h1>
+      <p class="text-sm text-[var(--toss-gray-500)] mb-6">정산할 인원의 이름을 입력해주세요</p>
+
+      <div id="memberList" class="space-y-2 mb-4"></div>
+
+      <div class="flex gap-2 mb-6">
+        <input id="memberInput" type="text" placeholder="이름 입력 후 추가"
+          class="flex-1 px-4 py-3 rounded-[14px] bg-[var(--toss-gray-100)] outline-none text-[15px] focus:ring-2 focus:ring-[var(--toss-blue)]" />
+        <button id="btnAddMember" class="btn-secondary px-5 text-[15px]">추가</button>
+      </div>
+    </section>
+
+    <!-- Step 2: 영수증 촬영 -->
+    <section id="step2" class="hidden fade-in">
+      <h1 class="text-[22px] font-extrabold mb-1">영수증을 찍어주세요</h1>
+      <p class="text-sm text-[var(--toss-gray-500)] mb-6">사진에서 품목과 금액을 자동으로 인식해요</p>
+
+      <div id="receiptDropZone" class="toss-card border-2 border-dashed border-[var(--toss-gray-300)] flex flex-col items-center justify-center py-14 px-4 mb-4 cursor-pointer active:bg-[var(--toss-gray-100)]">
+        <div class="text-5xl mb-3">📷</div>
+        <div class="font-bold text-[15px] mb-1">사진 선택 또는 촬영</div>
+        <div class="text-xs text-[var(--toss-gray-500)]">JPG, PNG 지원</div>
+      </div>
+      <input id="receiptInput" type="file" accept="image/*" capture="environment" class="hidden" />
+
+      <img id="receiptPreview" class="hidden w-full rounded-[16px] mb-4 max-h-[320px] object-contain bg-[var(--toss-gray-100)]" />
+
+      <div id="ocrProgressBox" class="hidden toss-card p-5 mb-4 flex flex-col items-center gap-3">
+        <div class="spinner"></div>
+        <div class="text-sm font-semibold" id="ocrStatusText">영수증을 읽고 있어요...</div>
+        <div class="w-full progress-bar-bg"><div id="ocrProgressFill" class="progress-bar-fill" style="width:0%"></div></div>
+      </div>
+
+      <button id="btnSkipOcr" class="w-full text-center text-sm font-semibold text-[var(--toss-gray-500)] py-3 active:opacity-60">
+        영수증 없이 직접 입력할게요
+      </button>
+    </section>
+
+    <!-- Step 3: 품목 수정 + 지분 매칭 -->
+    <section id="step3" class="hidden fade-in pb-4">
+      <h1 class="text-[22px] font-extrabold mb-1">누가 뭘 먹었나요?</h1>
+      <p class="text-sm text-[var(--toss-gray-500)] mb-5">품목/금액을 확인하고 멤버를 매칭해주세요</p>
+
+      <div id="itemList" class="space-y-3 mb-4"></div>
+
+      <button id="btnAddItem" class="w-full btn-secondary py-3 text-[14px] mb-6">+ 품목 추가</button>
+
+      <div class="toss-card p-4 flex items-center justify-between">
+        <span class="text-sm font-semibold text-[var(--toss-gray-700)]">품목 합계</span>
+        <span id="itemsTotal" class="text-[17px] font-extrabold">0원</span>
+      </div>
+    </section>
+
+    <!-- Step 4: 정산 대시보드 -->
+    <section id="step4" class="hidden fade-in pb-4">
+      <h1 class="text-[22px] font-extrabold mb-1">정산 결과</h1>
+      <p class="text-sm text-[var(--toss-gray-500)] mb-5">각자 보낼 금액을 확인해주세요</p>
+
+      <div class="toss-card p-5 mb-5 text-center" style="background:linear-gradient(135deg,#3182f6,#1b64da)">
+        <div class="text-white/80 text-xs font-semibold mb-1">총 결제 금액</div>
+        <div id="dashTotal" class="text-white text-[28px] font-extrabold">0원</div>
+      </div>
+
+      <div id="settleList" class="space-y-3"></div>
+    </section>
+
+  </main>
+
+  <!-- 하단 고정 버튼 -->
+  <div class="bottom-fixed">
+    <button id="btnNext" class="btn-primary w-full py-4 text-[16px]">다음</button>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- 상태 관리 ----------
+  const state = {
+    step: 1,
+    members: [],          // [{id,name,color}]
+    receiptImage: null,   // dataURL
+    items: [],            // [{id, name, price, qty, assignedTo:[memberId,...]}]
+    settlement: null
+  };
+
+  const AVATAR_COLORS = ["#3182f6","#00c781","#f04452","#ff9f1c","#9b5de5","#00bbf9","#fb5607","#2ec4b6"];
+
+  function uid(){ return Math.random().toString(36).slice(2,9); }
+  function won(n){ return Math.round(n).toLocaleString("ko-KR") + "원"; }
+
+  function save(){
+    try{ localStorage.setItem("nbbang_state", JSON.stringify(state)); }catch(e){}
+  }
+  function load(){
+    try{
+      const raw = localStorage.getItem("nbbang_state");
+      if(raw){
+        const parsed = JSON.parse(raw);
+        Object.assign(state, parsed);
+      }
+    }catch(e){}
+  }
+
+  // ---------- DOM refs ----------
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  const stepSections = { 1: $("#step1"), 2: $("#step2"), 3: $("#step3"), 4: $("#step4") };
+  const stepDots = $$("#stepDots .step-dot");
+  const btnNext = $("#btnNext");
+
+  // ---------- 화면 전환 ----------
+  function renderStepUI(){
+    Object.entries(stepSections).forEach(([num, el]) => {
+      el.classList.toggle("hidden", Number(num) !== state.step);
+    });
+    stepDots.forEach((dot) => {
+      const n = Number(dot.dataset.step);
+      dot.classList.toggle("active", n === state.step);
+      dot.classList.toggle("done", n < state.step);
+    });
+
+    if(state.step === 1){
+      btnNext.textContent = "다음";
+      btnNext.disabled = state.members.length < 1;
+    } else if(state.step === 2){
+      btnNext.textContent = "다음";
+      btnNext.disabled = !state.receiptImage && state.items.length === 0;
+    } else if(state.step === 3){
+      btnNext.textContent = "정산하기";
+      btnNext.disabled = state.items.length === 0;
+    } else if(state.step === 4){
+      btnNext.textContent = "새 정산 시작";
+      btnNext.disabled = false;
+    }
+    btnNext.classList.toggle("opacity-40", btnNext.disabled);
+  }
+
+  function goToStep(n){
+    state.step = n;
+    if(n === 3) renderItems();
+    if(n === 4) renderSettlement();
+    renderStepUI();
+    save();
+    window.scrollTo({top:0, behavior:"smooth"});
+  }
+
+  // ====================================================
+  // STEP 1: 인원 입력
+  // ====================================================
+  const memberListEl = $("#memberList");
+  const memberInput = $("#memberInput");
+
+  function renderMembers(){
+    memberListEl.innerHTML = "";
+    state.members.forEach((m) => {
+      const row = document.createElement("div");
+      row.className = "flex items-center justify-between toss-card px-4 py-3";
+      row.innerHTML = `
+        <div class="flex items-center gap-3">
+          <div class="member-avatar" style="background:${m.color}">${m.name.slice(0,1)}</div>
+          <span class="font-semibold text-[15px]">${escapeHtml(m.name)}</span>
+        </div>
+        <button data-id="${m.id}" class="removeMemberBtn text-[var(--toss-gray-500)] text-sm font-bold px-2">✕</button>
+      `;
+      memberListEl.appendChild(row);
+    });
+    $$(".removeMemberBtn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.members = state.members.filter((m) => m.id !== btn.dataset.id);
+        renderMembers();
+        renderStepUI();
+        save();
+      });
+    });
+  }
+
+  function addMember(){
+    const name = memberInput.value.trim();
+    if(!name) return;
+    if(state.members.some((m) => m.name === name)){
+      memberInput.value = "";
+      return;
+    }
+    state.members.push({
+      id: uid(),
+      name,
+      color: AVATAR_COLORS[state.members.length % AVATAR_COLORS.length]
+    });
+    memberInput.value = "";
+    renderMembers();
+    renderStepUI();
+    save();
+    memberInput.focus();
+  }
+
+  $("#btnAddMember").addEventListener("click", addMember);
+  memberInput.addEventListener("keydown", (e) => {
+    if(e.key === "Enter") addMember();
+  });
+
+  function escapeHtml(str){
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ====================================================
+  // STEP 2: 영수증 촬영 + OCR
+  // ====================================================
+  const receiptDropZone = $("#receiptDropZone");
+  const receiptInput = $("#receiptInput");
+  const receiptPreview = $("#receiptPreview");
+  const ocrProgressBox = $("#ocrProgressBox");
+  const ocrProgressFill = $("#ocrProgressFill");
+  const ocrStatusText = $("#ocrStatusText");
+
+  receiptDropZone.addEventListener("click", () => receiptInput.click());
+
+  receiptInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      state.receiptImage = reader.result;
+      receiptPreview.src = state.receiptImage;
+      receiptPreview.classList.remove("hidden");
+      receiptDropZone.classList.add("hidden");
+      runOcr(state.receiptImage);
+    };
+    reader.readAsDataURL(file);
+  });
+
+  async function runOcr(dataUrl){
+    ocrProgressBox.classList.remove("hidden");
+    ocrStatusText.textContent = "영수증을 읽고 있어요...";
+    ocrProgressFill.style.width = "0%";
+    btnNext.disabled = true;
+
+    try{
+      const result = await Tesseract.recognize(dataUrl, "kor+eng", {
+        logger: (m) => {
+          if(m.status === "recognizing text"){
+            const pct = Math.round((m.progress || 0) * 100);
+            ocrProgressFill.style.width = pct + "%";
+            ocrStatusText.textContent = `텍스트 인식 중... ${pct}%`;
+          } else if(m.status){
+            ocrStatusText.textContent = statusLabel(m.status);
+          }
+        }
+      });
+      const parsedItems = parseReceiptText(result.data.text);
+      if(parsedItems.length > 0){
+        state.items = parsedItems;
+      } else {
+        state.items = [{ id: uid(), name: "품목 1", price: 0, qty: 1, assignedTo: [] }];
+      }
+      ocrStatusText.textContent = "인식 완료!";
+      ocrProgressFill.style.width = "100%";
+      setTimeout(() => {
+        ocrProgressBox.classList.add("hidden");
+        renderStepUI();
+        save();
+      }, 400);
+    } catch(err){
+      ocrStatusText.textContent = "인식에 실패했어요. 직접 입력해주세요.";
+      state.items = state.items.length ? state.items : [{ id: uid(), name: "품목 1", price: 0, qty: 1, assignedTo: [] }];
+      setTimeout(() => {
+        ocrProgressBox.classList.add("hidden");
+        renderStepUI();
+        save();
+      }, 1200);
+    }
+  }
+
+  function statusLabel(status){
+    const map = {
+      "loading tesseract core": "엔진 불러오는 중...",
+      "initializing tesseract": "초기화 중...",
+      "loading language traineddata": "언어 데이터 불러오는 중...",
+      "initializing api": "준비 중...",
+      "recognizing text": "텍스트 인식 중..."
+    };
+    return map[status] || "처리 중...";
+  }
+
+  // 영수증 텍스트에서 "품목명 ... 금액" 패턴 추출
+  function parseReceiptText(text){
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    const items = [];
+    const priceRegex = /([0-9][0-9,\.]{2,})\s*원?$/;
+    const ignoreWords = ["합계","총액","받을금액","받은금액","거스름","부가세","과세","카드","승인","현금","총구매","포인트","할인","total","sum"];
+
+    lines.forEach((line) => {
+      const lower = line.toLowerCase();
+      if(ignoreWords.some((w) => lower.includes(w))) return;
+
+      const match = line.match(priceRegex);
+      if(!match) return;
+
+      const rawPrice = match[1].replace(/[,\.]/g, "");
+      const price = parseInt(rawPrice, 10);
+      if(isNaN(price) || price < 100 || price > 5000000) return;
+
+      let name = line.slice(0, match.index).trim();
+      name = name.replace(/[\*\-_:]+$/, "").trim();
+      if(!name) name = "품목";
+      if(name.length > 20) name = name.slice(0, 20);
+
+      items.push({ id: uid(), name, price, qty: 1, assignedTo: [] });
+    });
+
+    return items.slice(0, 30);
+  }
+
+  $("#btnSkipOcr").addEventListener("click", () => {
+    if(state.items.length === 0){
+      state.items = [{ id: uid(), name: "품목 1", price: 0, qty: 1, assignedTo: [] }];
+    }
+    goToStep(3);
+  });
+
+  // ====================================================
+  // STEP 3: 품목 수정 + 멤버 지분 매칭
+  // ====================================================
+  const itemListEl = $("#itemList");
+
+  function renderItems(){
+    itemListEl.innerHTML = "";
+    state.items.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "toss-card p-4";
+      card.innerHTML = `
+        <div class="flex items-center gap-2 mb-3">
+          <input data-id="${item.id}" data-field="name" value="${escapeHtml(item.name)}"
+            class="item-name-input flex-1 px-3 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold outline-none" />
+          <input data-id="${item.id}" data-field="price" type="number" value="${item.price}"
+            class="item-price-input w-[100px] px-3 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold text-right outline-none" />
+          <button data-id="${item.id}" class="removeItemBtn text-[var(--toss-gray-500)] text-sm font-bold px-1">✕</button>
+        </div>
+        <div class="flex flex-wrap gap-2 chip-group" data-id="${item.id}">
+          ${state.members.map((m) => `
+            <button class="chip member-chip ${item.assignedTo.includes(m.id) ? "selected" : ""}" data-item="${item.id}" data-member="${m.id}">
+              ${escapeHtml(m.name)}
+            </button>
+          `).join("")}
+        </div>
+        ${state.members.length === 0 ? `<p class="text-xs text-[var(--toss-gray-500)]">1단계에서 멤버를 추가해주세요</p>` : ""}
+      `;
+      itemListEl.appendChild(card);
+    });
+
+    $$(".item-name-input").forEach((input) => {
+      input.addEventListener("input", () => {
+        const item = state.items.find((i) => i.id === input.dataset.id);
+        if(item){ item.name = input.value; save(); }
+      });
+    });
+    $$(".item-price-input").forEach((input) => {
+      input.addEventListener("input", () => {
+        const item = state.items.find((i) => i.id === input.dataset.id);
+        if(item){ item.price = parseInt(input.value, 10) || 0; updateItemsTotal(); save(); }
+      });
+    });
+    $$(".removeItemBtn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.items = state.items.filter((i) => i.id !== btn.dataset.id);
+        renderItems();
+        renderStepUI();
+        save();
+      });
+    });
+    $$(".member-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const item = state.items.find((i) => i.id === chip.dataset.item);
+        const memberId = chip.dataset.member;
+        if(!item) return;
+        const idx = item.assignedTo.indexOf(memberId);
+        if(idx >= 0){ item.assignedTo.splice(idx, 1); chip.classList.remove("selected"); }
+        else { item.assignedTo.push(memberId); chip.classList.add("selected"); }
+        save();
+      });
+    });
+
+    updateItemsTotal();
+  }
+
+  function updateItemsTotal(){
+    const total = state.items.reduce((sum, i) => sum + (i.price * (i.qty || 1)), 0);
+    $("#itemsTotal").textContent = won(total);
+  }
+
+  $("#btnAddItem").addEventListener("click", () => {
+    state.items.push({ id: uid(), name: "새 품목", price: 0, qty: 1, assignedTo: [] });
+    renderItems();
+    renderStepUI();
+    save();
+  });
+
+  // ====================================================
+  // STEP 4: 정산 대시보드
+  // ====================================================
+  const settleListEl = $("#settleList");
+
+  function computeSettlement(){
+    const totals = {}; // memberId -> amount owed
+    state.members.forEach((m) => totals[m.id] = 0);
+
+    let unassignedTotal = 0;
+
+    state.items.forEach((item) => {
+      const amount = item.price * (item.qty || 1);
+      if(item.assignedTo.length === 0){
+        unassignedTotal += amount;
+        return;
+      }
+      const share = amount / item.assignedTo.length;
+      item.assignedTo.forEach((mid) => {
+        if(totals[mid] === undefined) totals[mid] = 0;
+        totals[mid] += share;
+      });
+    });
+
+    // 멤버 없이 배정된 품목은 전체 인원 N분의 1로 분배
+    if(unassignedTotal > 0 && state.members.length > 0){
+      const evenShare = unassignedTotal / state.members.length;
+      state.members.forEach((m) => totals[m.id] += evenShare);
+    }
+
+    const grandTotal = state.items.reduce((sum, i) => sum + (i.price * (i.qty || 1)), 0);
+
+    return { totals, grandTotal };
+  }
+
+  function renderSettlement(){
+    const { totals, grandTotal } = computeSettlement();
+    state.settlement = totals;
+    $("#dashTotal").textContent = won(grandTotal);
+
+    settleListEl.innerHTML = "";
+    state.members.forEach((m) => {
+      const amount = totals[m.id] || 0;
+      const paid = state.paidStatus && state.paidStatus[m.id];
+      const row = document.createElement("div");
+      row.className = "toss-card p-4 flex items-center justify-between";
+      row.innerHTML = `
+        <div class="flex items-center gap-3">
+          <div class="member-avatar" style="background:${m.color}">${escapeHtml(m.name.slice(0,1))}</div>
+          <div>
+            <div class="font-bold text-[15px]">${escapeHtml(m.name)}</div>
+            <div class="text-[13px] text-[var(--toss-gray-500)]">${won(amount)}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="kakaoBtn chip" data-id="${m.id}" style="border-color:#fee500;background:#fee500;color:#191600">카카오</button>
+          <button class="tossBtn chip" data-id="${m.id}" style="border-color:#3182f6;background:#3182f6;color:#fff">토스</button>
+          <button class="paidBtn chip ${paid ? "selected" : ""}" data-id="${m.id}" style="${paid ? "background:#00c781;border-color:#00c781;color:#fff" : ""}">${paid ? "완료 ✓" : "입금완료"}</button>
+        </div>
+      `;
+      settleListEl.appendChild(row);
+    });
+
+    $$(".kakaoBtn").forEach((btn) => btn.addEventListener("click", () => shareMessage(btn.dataset.id, "kakao")));
+    $$(".tossBtn").forEach((btn) => btn.addEventListener("click", () => shareMessage(btn.dataset.id, "toss")));
+    $$(".paidBtn").forEach((btn) => btn.addEventListener("click", () => {
+      if(!state.paidStatus) state.paidStatus = {};
+      state.paidStatus[btn.dataset.id] = !state.paidStatus[btn.dataset.id];
+      renderSettlement();
+      save();
+    }));
+  }
+
+  function shareMessage(memberId, channel){
+    const member = state.members.find((m) => m.id === memberId);
+    if(!member) return;
+    const amount = (state.settlement && state.settlement[memberId]) || 0;
+    const text = `[엔빵 정산] ${member.name}님, 정산 금액은 ${won(amount)} 입니다.`;
+
+    if(navigator.share){
+      navigator.share({ text }).catch(() => fallbackCopy(text, channel));
+    } else {
+      fallbackCopy(text, channel);
+    }
+  }
+
+  function fallbackCopy(text, channel){
+    navigator.clipboard?.writeText(text).then(() => {
+      alert(`${channel === "kakao" ? "카카오톡" : "토스"}로 보낼 메시지가 복사되었어요:\n\n${text}`);
+    }).catch(() => {
+      alert(text);
+    });
+  }
+
+  // ====================================================
+  // 하단 고정 버튼 흐름 제어
+  // ====================================================
+  btnNext.addEventListener("click", () => {
+    if(btnNext.disabled) return;
+
+    if(state.step === 1){
+      goToStep(2);
+    } else if(state.step === 2){
+      if(state.items.length === 0){
+        state.items = [{ id: uid(), name: "품목 1", price: 0, qty: 1, assignedTo: [] }];
+      }
+      goToStep(3);
+    } else if(state.step === 3){
+      goToStep(4);
+    } else if(state.step === 4){
+      resetApp();
+    }
+  });
+
+  function resetApp(){
+    state.step = 1;
+    state.members = [];
+    state.receiptImage = null;
+    state.items = [];
+    state.settlement = null;
+    state.paidStatus = {};
+    receiptPreview.classList.add("hidden");
+    receiptDropZone.classList.remove("hidden");
+    receiptInput.value = "";
+    renderMembers();
+    renderStepUI();
+    save();
+  }
+
+  $("#btnRestart").addEventListener("click", () => {
+    if(confirm("처음으로 돌아가면 입력한 내용이 사라져요. 계속할까요?")){
+      resetApp();
+    }
+  });
+
+  // ---------- 홈 화면에 추가 (PWA) ----------
+  let deferredInstallPrompt = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+  });
+  $("#btnAddHome").addEventListener("click", () => {
+    if(deferredInstallPrompt){
+      deferredInstallPrompt.prompt();
+    } else {
+      alert("브라우저 메뉴에서 '홈 화면에 추가'를 선택해주세요.");
+    }
+  });
+
+  // ---------- 초기화 ----------
+  load();
+  renderMembers();
+  if(state.items.length) renderItems();
+  if(state.receiptImage){
+    receiptPreview.src = state.receiptImage;
+    receiptPreview.classList.remove("hidden");
+    receiptDropZone.classList.add("hidden");
+  }
+  renderStepUI();
+
+})();
+</script>
+</body>
+</html>
