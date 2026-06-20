@@ -131,15 +131,32 @@
 
     <!-- Step 1: 인원 입력 -->
     <section id="step1" class="fade-in">
-      <h1 class="text-[22px] font-extrabold mb-1">누구랑 나눠 낼까요?</h1>
-      <p class="text-sm text-[var(--toss-gray-500)] mb-6">정산할 인원의 이름을 입력해주세요</p>
 
-      <div id="memberList" class="space-y-2 mb-4"></div>
+      <!-- 1-A: 인원수 입력 -->
+      <div id="countPhase">
+        <h1 class="text-[22px] font-extrabold mb-1">몇 명이서 드셨나요?</h1>
+        <p class="text-sm text-[var(--toss-gray-500)] mb-6">인원 수를 입력하면 멤버가 자동으로 생성돼요</p>
 
-      <div class="flex gap-2 mb-6">
-        <input id="memberInput" type="text" placeholder="이름 입력 후 추가"
-          class="flex-1 px-4 py-3 rounded-[14px] bg-[var(--toss-gray-100)] outline-none text-[15px] focus:ring-2 focus:ring-[var(--toss-blue)]" />
-        <button id="btnAddMember" class="btn-secondary px-5 text-[15px]">추가</button>
+        <div class="flex items-center justify-center gap-5 mb-6">
+          <button id="btnCountMinus" class="btn-secondary w-12 h-12 text-[20px] font-bold">−</button>
+          <input id="countInput" type="number" inputmode="numeric" min="1" max="20" value="4"
+            class="w-20 text-center text-[28px] font-extrabold outline-none" />
+          <button id="btnCountPlus" class="btn-secondary w-12 h-12 text-[20px] font-bold">+</button>
+        </div>
+
+        <button id="btnConfirmCount" class="btn-primary w-full py-4 text-[16px] mb-2">인원 확정</button>
+      </div>
+
+      <!-- 1-B: 멤버 이름 확인/수정 -->
+      <div id="memberPhase" class="hidden">
+        <h1 class="text-[22px] font-extrabold mb-1">멤버 이름을 확인해주세요</h1>
+        <p class="text-sm text-[var(--toss-gray-500)] mb-6">이름을 누르면 수정할 수 있어요. 그대로 두셔도 괜찮아요</p>
+
+        <div id="memberList" class="space-y-2 mb-4"></div>
+
+        <button id="btnBackToCount" class="w-full text-center text-sm font-semibold text-[var(--toss-gray-500)] py-3 active:opacity-60">
+          인원 수 다시 입력하기
+        </button>
       </div>
     </section>
 
@@ -212,6 +229,7 @@
   // ---------- 상태 관리 ----------
   const state = {
     step: 1,
+    step1Phase: "count",   // "count" | "member"
     members: [],          // [{id,name,color}]
     receiptImage: null,   // dataURL
     items: [],            // [{id, name, price, qty, assignedTo:[memberId,...]}]
@@ -219,6 +237,11 @@
   };
 
   const AVATAR_COLORS = ["#3182f6","#00c781","#f04452","#ff9f1c","#9b5de5","#00bbf9","#fb5607","#2ec4b6"];
+  const DEFAULT_ITEM_NAMES = ["식사", "맥주", "소주"];
+
+  function makeDefaultItems(){
+    return DEFAULT_ITEM_NAMES.map((name) => ({ id: uid(), name, price: 0, qty: 1, assignedTo: [] }));
+  }
 
   function uid(){ return Math.random().toString(36).slice(2,9); }
   function won(n){ return Math.round(n).toLocaleString("ko-KR") + "원"; }
@@ -257,7 +280,7 @@
 
     if(state.step === 1){
       btnNext.textContent = "다음";
-      btnNext.disabled = state.members.length < 1;
+      btnNext.disabled = state.step1Phase !== "member" || state.members.length < 1;
     } else if(state.step === 2){
       btnNext.textContent = "다음";
       btnNext.disabled = !state.receiptImage && state.items.length === 0;
@@ -281,10 +304,47 @@
   }
 
   // ====================================================
-  // STEP 1: 인원 입력
+  // STEP 1: 인원수 입력 -> 멤버 자동 생성 -> 이름 확인/수정
   // ====================================================
+  const countPhaseEl = $("#countPhase");
+  const memberPhaseEl = $("#memberPhase");
+  const countInput = $("#countInput");
   const memberListEl = $("#memberList");
-  const memberInput = $("#memberInput");
+
+  function clampCount(n){ return Math.min(20, Math.max(1, n)); }
+
+  $("#btnCountMinus").addEventListener("click", () => {
+    countInput.value = clampCount((parseInt(countInput.value, 10) || 1) - 1);
+  });
+  $("#btnCountPlus").addEventListener("click", () => {
+    countInput.value = clampCount((parseInt(countInput.value, 10) || 1) + 1);
+  });
+
+  $("#btnConfirmCount").addEventListener("click", () => {
+    const count = clampCount(parseInt(countInput.value, 10) || 1);
+    state.members = Array.from({ length: count }, (_, i) => ({
+      id: uid(),
+      name: `멤버${i + 1}`,
+      color: AVATAR_COLORS[i % AVATAR_COLORS.length]
+    }));
+    state.step1Phase = "member";
+    showStep1Phase();
+    renderMembers();
+    renderStepUI();
+    save();
+  });
+
+  $("#btnBackToCount").addEventListener("click", () => {
+    state.step1Phase = "count";
+    showStep1Phase();
+    renderStepUI();
+    save();
+  });
+
+  function showStep1Phase(){
+    countPhaseEl.classList.toggle("hidden", state.step1Phase !== "count");
+    memberPhaseEl.classList.toggle("hidden", state.step1Phase !== "member");
+  }
 
   function renderMembers(){
     memberListEl.innerHTML = "";
@@ -292,13 +352,31 @@
       const row = document.createElement("div");
       row.className = "flex items-center justify-between toss-card px-4 py-3";
       row.innerHTML = `
-        <div class="flex items-center gap-3">
-          <div class="member-avatar" style="background:${m.color}">${m.name.slice(0,1)}</div>
-          <span class="font-semibold text-[15px]">${escapeHtml(m.name)}</span>
+        <div class="flex items-center gap-3 flex-1">
+          <div class="member-avatar" style="background:${m.color}">${escapeHtml(m.name.slice(0,1))}</div>
+          <input data-id="${m.id}" value="${escapeHtml(m.name)}"
+            class="member-name-input flex-1 font-semibold text-[15px] outline-none bg-transparent" />
         </div>
         <button data-id="${m.id}" class="removeMemberBtn text-[var(--toss-gray-500)] text-sm font-bold px-2">✕</button>
       `;
       memberListEl.appendChild(row);
+    });
+    $$(".member-name-input").forEach((input) => {
+      input.addEventListener("input", () => {
+        const m = state.members.find((mm) => mm.id === input.dataset.id);
+        if(m){ m.name = input.value; save(); }
+      });
+      input.addEventListener("blur", () => {
+        const m = state.members.find((mm) => mm.id === input.dataset.id);
+        if(m && !m.name.trim()){
+          const idx = state.members.indexOf(m);
+          m.name = `멤버${idx + 1}`;
+          input.value = m.name;
+          save();
+        }
+        renderItems();
+        renderSettlement();
+      });
     });
     $$(".removeMemberBtn").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -309,30 +387,6 @@
       });
     });
   }
-
-  function addMember(){
-    const name = memberInput.value.trim();
-    if(!name) return;
-    if(state.members.some((m) => m.name === name)){
-      memberInput.value = "";
-      return;
-    }
-    state.members.push({
-      id: uid(),
-      name,
-      color: AVATAR_COLORS[state.members.length % AVATAR_COLORS.length]
-    });
-    memberInput.value = "";
-    renderMembers();
-    renderStepUI();
-    save();
-    memberInput.focus();
-  }
-
-  $("#btnAddMember").addEventListener("click", addMember);
-  memberInput.addEventListener("keydown", (e) => {
-    if(e.key === "Enter") addMember();
-  });
 
   function escapeHtml(str){
     const div = document.createElement("div");
@@ -385,11 +439,7 @@
         }
       });
       const parsedItems = parseReceiptText(result.data.text);
-      if(parsedItems.length > 0){
-        state.items = parsedItems;
-      } else {
-        state.items = [{ id: uid(), name: "품목 1", price: 0, qty: 1, assignedTo: [] }];
-      }
+      state.items = mergeWithDefaultItems(parsedItems);
       ocrStatusText.textContent = "인식 완료!";
       ocrProgressFill.style.width = "100%";
       setTimeout(() => {
@@ -399,7 +449,7 @@
       }, 400);
     } catch(err){
       ocrStatusText.textContent = "인식에 실패했어요. 직접 입력해주세요.";
-      state.items = state.items.length ? state.items : [{ id: uid(), name: "품목 1", price: 0, qty: 1, assignedTo: [] }];
+      state.items = mergeWithDefaultItems([]);
       setTimeout(() => {
         ocrProgressBox.classList.add("hidden");
         renderStepUI();
@@ -448,9 +498,16 @@
     return items.slice(0, 30);
   }
 
+  function mergeWithDefaultItems(parsedItems){
+    const defaults = makeDefaultItems();
+    const parsedNames = new Set(parsedItems.map((i) => i.name));
+    const keptDefaults = defaults.filter((d) => !parsedNames.has(d.name));
+    return [...keptDefaults, ...parsedItems];
+  }
+
   $("#btnSkipOcr").addEventListener("click", () => {
     if(state.items.length === 0){
-      state.items = [{ id: uid(), name: "품목 1", price: 0, qty: 1, assignedTo: [] }];
+      state.items = makeDefaultItems();
     }
     goToStep(3);
   });
@@ -633,10 +690,11 @@
     if(btnNext.disabled) return;
 
     if(state.step === 1){
+      if(state.items.length === 0) state.items = makeDefaultItems();
       goToStep(2);
     } else if(state.step === 2){
       if(state.items.length === 0){
-        state.items = [{ id: uid(), name: "품목 1", price: 0, qty: 1, assignedTo: [] }];
+        state.items = makeDefaultItems();
       }
       goToStep(3);
     } else if(state.step === 3){
@@ -648,14 +706,17 @@
 
   function resetApp(){
     state.step = 1;
+    state.step1Phase = "count";
     state.members = [];
     state.receiptImage = null;
     state.items = [];
     state.settlement = null;
     state.paidStatus = {};
+    countInput.value = 4;
     receiptPreview.classList.add("hidden");
     receiptDropZone.classList.remove("hidden");
     receiptInput.value = "";
+    showStep1Phase();
     renderMembers();
     renderStepUI();
     save();
@@ -683,6 +744,7 @@
 
   // ---------- 초기화 ----------
   load();
+  showStep1Phase();
   renderMembers();
   if(state.items.length) renderItems();
   if(state.receiptImage){
