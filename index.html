@@ -208,19 +208,21 @@
   "use strict";
 
   // ---------- 상태 관리 ----------
+  // 품목 mode: "flat" (식사처럼 통으로 나눠 내는 금액, assignedTo 멤버끼리 N분의1)
+  //            "perPerson" (맥주/소주처럼 1인당 마신 잔수가 다른 경우, memberQty로 인당 잔수 입력)
   const state = {
     step: 1,
     members: [],          // [{id,name,color}]
-    items: [],            // [{id, name, price, qty, assignedTo:[memberId,...]}]
+    items: [],            // [{id, name, mode, price, assignedTo:[memberId,...], memberQty:{memberId:count}}]
     settlement: null
   };
 
   const AVATAR_COLORS = ["#3182f6","#00c781","#f04452","#ff9f1c","#9b5de5","#00bbf9","#fb5607","#2ec4b6"];
-  // 천원 단위 기본 단가: 식사는 직접 입력, 맥주/소주는 흔한 가격으로 미리 채워둠
+  // 천원 단위 기본 단가: 식사는 통으로 나눠 내는 금액, 맥주/소주는 1잔 기준 단가
   const DEFAULT_ITEMS_SPEC = [
-    { name: "식사", price: 0 },
-    { name: "맥주", price: 5000 },
-    { name: "소주", price: 4000 }
+    { name: "식사", mode: "flat", price: 0 },
+    { name: "맥주", mode: "perPerson", price: 5000 },
+    { name: "소주", mode: "perPerson", price: 4000 }
   ];
 
   function makeDefaultItems(){
@@ -228,10 +230,19 @@
     return DEFAULT_ITEMS_SPEC.map((spec) => ({
       id: uid(),
       name: spec.name,
+      mode: spec.mode,
       price: spec.price,
-      qty: 1,
-      assignedTo: spec.name === "식사" ? [...allMemberIds] : []
+      assignedTo: spec.mode === "flat" && spec.name === "식사" ? [...allMemberIds] : [],
+      memberQty: {}
     }));
+  }
+
+  function itemLineTotal(item){
+    if(item.mode === "perPerson"){
+      const totalQty = Object.values(item.memberQty || {}).reduce((a, b) => a + (b || 0), 0);
+      return item.price * totalQty;
+    }
+    return item.price;
   }
 
   function uid(){ return Math.random().toString(36).slice(2,9); }
@@ -425,7 +436,8 @@
     itemListEl.innerHTML = "";
     state.items.forEach((item) => {
       const thousands = Math.floor(item.price / 1000);
-      const lineTotal = item.price * (item.qty || 1);
+      const lineTotal = itemLineTotal(item);
+      const isPerPerson = item.mode === "perPerson";
       const card = document.createElement("div");
       card.className = "toss-card p-4";
       card.innerHTML = `
@@ -435,32 +447,42 @@
           <button data-id="${item.id}" class="removeItemBtn text-[var(--toss-gray-500)] text-sm font-bold px-1">✕</button>
         </div>
 
-        <div class="flex items-center justify-between gap-2 mb-2">
-          <div class="flex items-center gap-1.5">
-            <span class="text-xs text-[var(--toss-gray-500)] font-medium">단가</span>
-            <input data-id="${item.id}" type="number" inputmode="numeric" value="${thousands}"
-              class="item-price-input w-[64px] px-2 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold text-right outline-none" />
-            <span class="text-[13px] text-[var(--toss-gray-500)] font-semibold">,000원</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button data-id="${item.id}" class="qtyMinusBtn btn-secondary w-7 h-7 text-[14px] font-bold flex items-center justify-center">−</button>
-            <span class="text-[14px] font-bold w-6 text-center">${item.qty || 1}</span>
-            <button data-id="${item.id}" class="qtyPlusBtn btn-secondary w-7 h-7 text-[14px] font-bold flex items-center justify-center">+</button>
-          </div>
+        <div class="flex items-center gap-1.5 mb-3">
+          <span class="text-xs text-[var(--toss-gray-500)] font-medium">${isPerPerson ? "1잔 단가" : "금액"}</span>
+          <input data-id="${item.id}" type="number" inputmode="numeric" value="${thousands}"
+            class="item-price-input w-[64px] px-2 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold text-right outline-none" />
+          <span class="text-[13px] text-[var(--toss-gray-500)] font-semibold">,000원</span>
         </div>
 
-        <div class="text-right text-[13px] text-[var(--toss-gray-500)] mb-3">
+        ${isPerPerson ? `
+          <div class="space-y-2 mb-3">
+            ${state.members.map((m) => `
+              <div class="flex items-center justify-between">
+                <span class="text-[14px] font-semibold">${escapeHtml(m.name)}</span>
+                <div class="flex items-center gap-2">
+                  <button data-item="${item.id}" data-member="${m.id}" class="qtyMinusBtn btn-secondary w-7 h-7 text-[14px] font-bold flex items-center justify-center">−</button>
+                  <span class="text-[14px] font-bold w-6 text-center member-qty-value" data-item="${item.id}" data-member="${m.id}">${(item.memberQty && item.memberQty[m.id]) || 0}</span>
+                  <button data-item="${item.id}" data-member="${m.id}" class="qtyPlusBtn btn-secondary w-7 h-7 text-[14px] font-bold flex items-center justify-center">+</button>
+                  <span class="text-xs text-[var(--toss-gray-500)] w-4">잔</span>
+                </div>
+              </div>
+            `).join("")}
+            ${state.members.length === 0 ? `<p class="text-xs text-[var(--toss-gray-500)]">1단계에서 멤버를 추가해주세요</p>` : ""}
+          </div>
+        ` : `
+          <div class="flex flex-wrap gap-2 chip-group mb-3" data-id="${item.id}">
+            ${state.members.map((m) => `
+              <button class="chip member-chip ${item.assignedTo.includes(m.id) ? "selected" : ""}" data-item="${item.id}" data-member="${m.id}">
+                ${escapeHtml(m.name)}
+              </button>
+            `).join("")}
+          </div>
+          ${state.members.length === 0 ? `<p class="text-xs text-[var(--toss-gray-500)]">1단계에서 멤버를 추가해주세요</p>` : ""}
+        `}
+
+        <div class="text-right text-[13px] text-[var(--toss-gray-500)]">
           소계 <span class="subtotal-value font-bold text-[var(--toss-gray-900)]" data-id="${item.id}">${won(lineTotal)}</span>
         </div>
-
-        <div class="flex flex-wrap gap-2 chip-group" data-id="${item.id}">
-          ${state.members.map((m) => `
-            <button class="chip member-chip ${item.assignedTo.includes(m.id) ? "selected" : ""}" data-item="${item.id}" data-member="${m.id}">
-              ${escapeHtml(m.name)}
-            </button>
-          `).join("")}
-        </div>
-        ${state.members.length === 0 ? `<p class="text-xs text-[var(--toss-gray-500)]">1단계에서 멤버를 추가해주세요</p>` : ""}
       `;
       itemListEl.appendChild(card);
     });
@@ -476,22 +498,35 @@
         const item = state.items.find((i) => i.id === input.dataset.id);
         if(!item) return;
         item.price = (parseInt(input.value, 10) || 0) * 1000;
-        const subtotalEl = document.querySelector(`.subtotal-value[data-id="${item.id}"]`);
-        if(subtotalEl) subtotalEl.textContent = won(item.price * (item.qty || 1));
+        updateSubtotalDisplay(item);
         updateItemsTotal();
         save();
       });
     });
     $$(".qtyMinusBtn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const item = state.items.find((i) => i.id === btn.dataset.id);
-        if(item){ item.qty = Math.max(1, (item.qty || 1) - 1); renderItems(); save(); }
+        const item = state.items.find((i) => i.id === btn.dataset.item);
+        if(!item) return;
+        if(!item.memberQty) item.memberQty = {};
+        const mid = btn.dataset.member;
+        item.memberQty[mid] = Math.max(0, (item.memberQty[mid] || 0) - 1);
+        updateMemberQtyDisplay(item, mid);
+        updateSubtotalDisplay(item);
+        updateItemsTotal();
+        save();
       });
     });
     $$(".qtyPlusBtn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const item = state.items.find((i) => i.id === btn.dataset.id);
-        if(item){ item.qty = Math.min(99, (item.qty || 1) + 1); renderItems(); save(); }
+        const item = state.items.find((i) => i.id === btn.dataset.item);
+        if(!item) return;
+        if(!item.memberQty) item.memberQty = {};
+        const mid = btn.dataset.member;
+        item.memberQty[mid] = Math.min(99, (item.memberQty[mid] || 0) + 1);
+        updateMemberQtyDisplay(item, mid);
+        updateSubtotalDisplay(item);
+        updateItemsTotal();
+        save();
       });
     });
     $$(".removeItemBtn").forEach((btn) => {
@@ -517,13 +552,23 @@
     updateItemsTotal();
   }
 
+  function updateSubtotalDisplay(item){
+    const subtotalEl = document.querySelector(`.subtotal-value[data-id="${item.id}"]`);
+    if(subtotalEl) subtotalEl.textContent = won(itemLineTotal(item));
+  }
+
+  function updateMemberQtyDisplay(item, memberId){
+    const el = document.querySelector(`.member-qty-value[data-item="${item.id}"][data-member="${memberId}"]`);
+    if(el) el.textContent = (item.memberQty[memberId] || 0);
+  }
+
   function updateItemsTotal(){
-    const total = state.items.reduce((sum, i) => sum + (i.price * (i.qty || 1)), 0);
+    const total = state.items.reduce((sum, i) => sum + itemLineTotal(i), 0);
     $("#itemsTotal").textContent = won(total);
   }
 
   $("#btnAddItem").addEventListener("click", () => {
-    state.items.push({ id: uid(), name: "새 품목", price: 0, qty: 1, assignedTo: [] });
+    state.items.push({ id: uid(), name: "새 품목", mode: "flat", price: 0, assignedTo: [], memberQty: {} });
     renderItems();
     renderStepUI();
     save();
@@ -541,7 +586,18 @@
     let unassignedTotal = 0;
 
     state.items.forEach((item) => {
-      const amount = item.price * (item.qty || 1);
+      if(item.mode === "perPerson"){
+        // 인당 마신 잔수만큼 단가를 곱해서 각자에게 부과 (균등분배 아님)
+        Object.entries(item.memberQty || {}).forEach(([mid, qty]) => {
+          if(qty > 0){
+            if(totals[mid] === undefined) totals[mid] = 0;
+            totals[mid] += qty * item.price;
+          }
+        });
+        return;
+      }
+
+      const amount = item.price;
       if(item.assignedTo.length === 0){
         unassignedTotal += amount;
         return;
@@ -559,7 +615,7 @@
       state.members.forEach((m) => totals[m.id] += evenShare);
     }
 
-    const grandTotal = state.items.reduce((sum, i) => sum + (i.price * (i.qty || 1)), 0);
+    const grandTotal = state.items.reduce((sum, i) => sum + itemLineTotal(i), 0);
 
     return { totals, grandTotal };
   }
