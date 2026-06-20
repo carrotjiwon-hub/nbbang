@@ -216,16 +216,21 @@
   };
 
   const AVATAR_COLORS = ["#3182f6","#00c781","#f04452","#ff9f1c","#9b5de5","#00bbf9","#fb5607","#2ec4b6"];
-  const DEFAULT_ITEM_NAMES = ["식사", "맥주", "소주"];
+  // 천원 단위 기본 단가: 식사는 직접 입력, 맥주/소주는 흔한 가격으로 미리 채워둠
+  const DEFAULT_ITEMS_SPEC = [
+    { name: "식사", price: 0 },
+    { name: "맥주", price: 5000 },
+    { name: "소주", price: 4000 }
+  ];
 
   function makeDefaultItems(){
     const allMemberIds = state.members.map((m) => m.id);
-    return DEFAULT_ITEM_NAMES.map((name) => ({
+    return DEFAULT_ITEMS_SPEC.map((spec) => ({
       id: uid(),
-      name,
-      price: 0,
+      name: spec.name,
+      price: spec.price,
       qty: 1,
-      assignedTo: name === "식사" ? [...allMemberIds] : []
+      assignedTo: spec.name === "식사" ? [...allMemberIds] : []
     }));
   }
 
@@ -419,16 +424,35 @@
   function renderItems(){
     itemListEl.innerHTML = "";
     state.items.forEach((item) => {
+      const thousands = Math.floor(item.price / 1000);
+      const lineTotal = item.price * (item.qty || 1);
       const card = document.createElement("div");
       card.className = "toss-card p-4";
       card.innerHTML = `
         <div class="flex items-center gap-2 mb-3">
           <input data-id="${item.id}" data-field="name" value="${escapeHtml(item.name)}"
             class="item-name-input flex-1 px-3 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold outline-none" />
-          <input data-id="${item.id}" data-field="price" type="number" value="${item.price}"
-            class="item-price-input w-[100px] px-3 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold text-right outline-none" />
           <button data-id="${item.id}" class="removeItemBtn text-[var(--toss-gray-500)] text-sm font-bold px-1">✕</button>
         </div>
+
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <div class="flex items-center gap-1.5">
+            <span class="text-xs text-[var(--toss-gray-500)] font-medium">단가</span>
+            <input data-id="${item.id}" type="number" inputmode="numeric" value="${thousands}"
+              class="item-price-input w-[64px] px-2 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold text-right outline-none" />
+            <span class="text-[13px] text-[var(--toss-gray-500)] font-semibold">,000원</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button data-id="${item.id}" class="qtyMinusBtn btn-secondary w-7 h-7 text-[14px] font-bold flex items-center justify-center">−</button>
+            <span class="text-[14px] font-bold w-6 text-center">${item.qty || 1}</span>
+            <button data-id="${item.id}" class="qtyPlusBtn btn-secondary w-7 h-7 text-[14px] font-bold flex items-center justify-center">+</button>
+          </div>
+        </div>
+
+        <div class="text-right text-[13px] text-[var(--toss-gray-500)] mb-3">
+          소계 <span class="subtotal-value font-bold text-[var(--toss-gray-900)]" data-id="${item.id}">${won(lineTotal)}</span>
+        </div>
+
         <div class="flex flex-wrap gap-2 chip-group" data-id="${item.id}">
           ${state.members.map((m) => `
             <button class="chip member-chip ${item.assignedTo.includes(m.id) ? "selected" : ""}" data-item="${item.id}" data-member="${m.id}">
@@ -450,7 +474,24 @@
     $$(".item-price-input").forEach((input) => {
       input.addEventListener("input", () => {
         const item = state.items.find((i) => i.id === input.dataset.id);
-        if(item){ item.price = parseInt(input.value, 10) || 0; updateItemsTotal(); save(); }
+        if(!item) return;
+        item.price = (parseInt(input.value, 10) || 0) * 1000;
+        const subtotalEl = document.querySelector(`.subtotal-value[data-id="${item.id}"]`);
+        if(subtotalEl) subtotalEl.textContent = won(item.price * (item.qty || 1));
+        updateItemsTotal();
+        save();
+      });
+    });
+    $$(".qtyMinusBtn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const item = state.items.find((i) => i.id === btn.dataset.id);
+        if(item){ item.qty = Math.max(1, (item.qty || 1) - 1); renderItems(); save(); }
+      });
+    });
+    $$(".qtyPlusBtn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const item = state.items.find((i) => i.id === btn.dataset.id);
+        if(item){ item.qty = Math.min(99, (item.qty || 1) + 1); renderItems(); save(); }
       });
     });
     $$(".removeItemBtn").forEach((btn) => {
