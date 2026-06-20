@@ -4,9 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>엔빵 - 영수증 정산</title>
-<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoi7JeU67mAIiwic2hvcnRfbmFtZSI6IuyXlOu5gCIsInN0YXJ0X3VybCI6Ii4iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjZjJmNGY2IiwidGhlbWVfY29sb3IiOiIjMzE4MmY2In0=" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root{
     --toss-blue:#3182f6;
@@ -165,23 +166,15 @@
       <h1 class="text-[22px] font-extrabold mb-1">영수증을 찍어주세요</h1>
       <p class="text-sm text-[var(--toss-gray-500)] mb-6">사진에서 품목과 금액을 자동으로 인식해요</p>
 
-      <div id="receiptDropZone" class="toss-card border-2 border-dashed border-[var(--toss-gray-300)] flex flex-col items-center justify-center py-14 px-4 mb-4 cursor-pointer active:bg-[var(--toss-gray-100)]">
+      <div id="receiptDropZone" class="toss-card relative overflow-hidden flex flex-col items-center justify-center py-14 px-4 mb-4 opacity-60">
+        <span class="absolute top-3 right-3 chip" style="background:var(--toss-gray-300);border-color:var(--toss-gray-300);color:var(--toss-gray-700)">준비중</span>
         <div class="text-5xl mb-3">📷</div>
-        <div class="font-bold text-[15px] mb-1">사진 선택 또는 촬영</div>
-        <div class="text-xs text-[var(--toss-gray-500)]">JPG, PNG 지원</div>
-      </div>
-      <input id="receiptInput" type="file" accept="image/*" capture="environment" class="hidden" />
-
-      <img id="receiptPreview" class="hidden w-full rounded-[16px] mb-4 max-h-[320px] object-contain bg-[var(--toss-gray-100)]" />
-
-      <div id="ocrProgressBox" class="hidden toss-card p-5 mb-4 flex flex-col items-center gap-3">
-        <div class="spinner"></div>
-        <div class="text-sm font-semibold" id="ocrStatusText">영수증을 읽고 있어요...</div>
-        <div class="w-full progress-bar-bg"><div id="ocrProgressFill" class="progress-bar-fill" style="width:0%"></div></div>
+        <div class="font-bold text-[15px] mb-1">카메라로 한번에 업로드</div>
+        <div class="text-xs text-[var(--toss-gray-500)]">영수증 자동 인식 기능을 준비하고 있어요</div>
       </div>
 
-      <button id="btnSkipOcr" class="w-full text-center text-sm font-semibold text-[var(--toss-gray-500)] py-3 active:opacity-60">
-        영수증 없이 직접 입력할게요
+      <button id="btnSkipOcr" class="btn-primary w-full py-4 text-[16px]">
+        직접 입력할게요
       </button>
     </section>
 
@@ -231,7 +224,6 @@
     step: 1,
     step1Phase: "count",   // "count" | "member"
     members: [],          // [{id,name,color}]
-    receiptImage: null,   // dataURL
     items: [],            // [{id, name, price, qty, assignedTo:[memberId,...]}]
     settlement: null
   };
@@ -283,7 +275,7 @@
       btnNext.disabled = state.step1Phase !== "member" || state.members.length < 1;
     } else if(state.step === 2){
       btnNext.textContent = "다음";
-      btnNext.disabled = !state.receiptImage && state.items.length === 0;
+      btnNext.disabled = state.items.length === 0;
     } else if(state.step === 3){
       btnNext.textContent = "정산하기";
       btnNext.disabled = state.items.length === 0;
@@ -395,115 +387,13 @@
   }
 
   // ====================================================
-  // STEP 2: 영수증 촬영 + OCR
+  // STEP 2: 영수증 촬영 (카메라 OCR은 준비중)
   // ====================================================
   const receiptDropZone = $("#receiptDropZone");
-  const receiptInput = $("#receiptInput");
-  const receiptPreview = $("#receiptPreview");
-  const ocrProgressBox = $("#ocrProgressBox");
-  const ocrProgressFill = $("#ocrProgressFill");
-  const ocrStatusText = $("#ocrStatusText");
 
-  receiptDropZone.addEventListener("click", () => receiptInput.click());
-
-  receiptInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      state.receiptImage = reader.result;
-      receiptPreview.src = state.receiptImage;
-      receiptPreview.classList.remove("hidden");
-      receiptDropZone.classList.add("hidden");
-      runOcr(state.receiptImage);
-    };
-    reader.readAsDataURL(file);
+  receiptDropZone.addEventListener("click", () => {
+    alert("카메라로 한번에 업로드 기능은 현재 준비중이에요. 아래 '직접 입력할게요'로 진행해주세요!");
   });
-
-  async function runOcr(dataUrl){
-    ocrProgressBox.classList.remove("hidden");
-    ocrStatusText.textContent = "영수증을 읽고 있어요...";
-    ocrProgressFill.style.width = "0%";
-    btnNext.disabled = true;
-
-    try{
-      const result = await Tesseract.recognize(dataUrl, "kor+eng", {
-        logger: (m) => {
-          if(m.status === "recognizing text"){
-            const pct = Math.round((m.progress || 0) * 100);
-            ocrProgressFill.style.width = pct + "%";
-            ocrStatusText.textContent = `텍스트 인식 중... ${pct}%`;
-          } else if(m.status){
-            ocrStatusText.textContent = statusLabel(m.status);
-          }
-        }
-      });
-      const parsedItems = parseReceiptText(result.data.text);
-      state.items = mergeWithDefaultItems(parsedItems);
-      ocrStatusText.textContent = "인식 완료!";
-      ocrProgressFill.style.width = "100%";
-      setTimeout(() => {
-        ocrProgressBox.classList.add("hidden");
-        renderStepUI();
-        save();
-      }, 400);
-    } catch(err){
-      ocrStatusText.textContent = "인식에 실패했어요. 직접 입력해주세요.";
-      state.items = mergeWithDefaultItems([]);
-      setTimeout(() => {
-        ocrProgressBox.classList.add("hidden");
-        renderStepUI();
-        save();
-      }, 1200);
-    }
-  }
-
-  function statusLabel(status){
-    const map = {
-      "loading tesseract core": "엔진 불러오는 중...",
-      "initializing tesseract": "초기화 중...",
-      "loading language traineddata": "언어 데이터 불러오는 중...",
-      "initializing api": "준비 중...",
-      "recognizing text": "텍스트 인식 중..."
-    };
-    return map[status] || "처리 중...";
-  }
-
-  // 영수증 텍스트에서 "품목명 ... 금액" 패턴 추출
-  function parseReceiptText(text){
-    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-    const items = [];
-    const priceRegex = /([0-9][0-9,\.]{2,})\s*원?$/;
-    const ignoreWords = ["합계","총액","받을금액","받은금액","거스름","부가세","과세","카드","승인","현금","총구매","포인트","할인","total","sum"];
-
-    lines.forEach((line) => {
-      const lower = line.toLowerCase();
-      if(ignoreWords.some((w) => lower.includes(w))) return;
-
-      const match = line.match(priceRegex);
-      if(!match) return;
-
-      const rawPrice = match[1].replace(/[,\.]/g, "");
-      const price = parseInt(rawPrice, 10);
-      if(isNaN(price) || price < 100 || price > 5000000) return;
-
-      let name = line.slice(0, match.index).trim();
-      name = name.replace(/[\*\-_:]+$/, "").trim();
-      if(!name) name = "품목";
-      if(name.length > 20) name = name.slice(0, 20);
-
-      items.push({ id: uid(), name, price, qty: 1, assignedTo: [] });
-    });
-
-    return items.slice(0, 30);
-  }
-
-  function mergeWithDefaultItems(parsedItems){
-    const defaults = makeDefaultItems();
-    const parsedNames = new Set(parsedItems.map((i) => i.name));
-    const keptDefaults = defaults.filter((d) => !parsedNames.has(d.name));
-    return [...keptDefaults, ...parsedItems];
-  }
 
   $("#btnSkipOcr").addEventListener("click", () => {
     if(state.items.length === 0){
@@ -708,14 +598,10 @@
     state.step = 1;
     state.step1Phase = "count";
     state.members = [];
-    state.receiptImage = null;
     state.items = [];
     state.settlement = null;
     state.paidStatus = {};
     countInput.value = 4;
-    receiptPreview.classList.add("hidden");
-    receiptDropZone.classList.remove("hidden");
-    receiptInput.value = "";
     showStep1Phase();
     renderMembers();
     renderStepUI();
@@ -728,6 +614,11 @@
     }
   });
 
+  // ---------- 서비스워커 등록 (PWA 설치 가능 조건) ----------
+  if("serviceWorker" in navigator){
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+
   // ---------- 홈 화면에 추가 (PWA) ----------
   let deferredInstallPrompt = null;
   window.addEventListener("beforeinstallprompt", (e) => {
@@ -738,7 +629,10 @@
     if(deferredInstallPrompt){
       deferredInstallPrompt.prompt();
     } else {
-      alert("브라우저 메뉴에서 '홈 화면에 추가'를 선택해주세요.");
+      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      alert(isIOS
+        ? "iOS Safari는 자동 설치를 지원하지 않아요. 하단 공유 버튼 → '홈 화면에 추가'를 눌러주세요."
+        : "이 브라우저에서는 자동 설치 메뉴를 지원하지 않아요. 브라우저 메뉴에서 '홈 화면에 추가' 또는 '앱 설치'를 선택해주세요.");
     }
   });
 
@@ -747,11 +641,6 @@
   showStep1Phase();
   renderMembers();
   if(state.items.length) renderItems();
-  if(state.receiptImage){
-    receiptPreview.src = state.receiptImage;
-    receiptPreview.classList.remove("hidden");
-    receiptDropZone.classList.add("hidden");
-  }
   renderStepUI();
 
 })();
