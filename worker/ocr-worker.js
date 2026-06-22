@@ -48,16 +48,30 @@ export default {
 
       if (!visionRes.ok) {
         const errText = await visionRes.text();
-        return new Response(JSON.stringify({ error: "Vision API 오류", detail: errText }), {
+        return new Response(JSON.stringify({ error: "Vision API 오류", status: visionRes.status, detail: errText, keyLen: (env.GOOGLE_VISION_API_KEY || "").length }), {
           status: 502,
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
 
       const data = await visionRes.json();
-      const text = data?.responses?.[0]?.fullTextAnnotation?.text || "";
+      const resp = data?.responses?.[0] || {};
+      const text = resp.fullTextAnnotation?.text || "";
 
-      return new Response(JSON.stringify({ text }), {
+      // 단어별 위치(중심 x,y) 추출 — 영수증 행/열 구조 복원용
+      const ann = resp.textAnnotations || [];
+      const words = ann.slice(1).map((a) => {
+        const v = (a.boundingPoly && a.boundingPoly.vertices) || [];
+        const xs = v.map((p) => p.x || 0);
+        const ys = v.map((p) => p.y || 0);
+        return {
+          t: a.description,
+          x: Math.round((Math.min(...xs) + Math.max(...xs)) / 2),
+          y: Math.round((Math.min(...ys) + Math.max(...ys)) / 2)
+        };
+      });
+
+      return new Response(JSON.stringify({ text, words }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     } catch (err) {

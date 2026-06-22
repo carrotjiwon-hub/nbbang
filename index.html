@@ -610,11 +610,11 @@
         body: JSON.stringify({ imageBase64: base64 })
       });
       if(!res.ok) throw new Error("OCR 서버 오류 (HTTP " + res.status + ")");
-      const { text } = await res.json();
+      const { text, words } = await res.json();
       lastOcrText = text || "";
 
       ensureRounds();
-      const parsed = parseReceiptText(text || "");
+      const parsed = parseReceiptText(text || "", words);
       const total = extractReceiptTotal(text || "");
       const summary = applyReceiptToRound(parsed, total);
       ocrStatusText.textContent = summary;
@@ -640,8 +640,57 @@
     }
   }
 
-  // 영수증 텍스트에서 한 줄씩 {품목명, 금액(lineTotal), 수량(qty)} 추출 (한국 영수증 다양한 형식 대응)
-  function parseReceiptText(text){
+  const RECEIPT_IGNORE = ["합계","총액","받을금액","받은금액","거스름","부가세","과세","면세","봉사료","카드","승인","현금","총구매","구매액","포인트","적립","할인","공급가","부가가치","결제","금액계","수량","단가","품목","total","sum","tel","사업자","대표자","주소"];
+
+  // 단어 좌표(words)가 있으면 행/열 구조로 정확히 파싱, 없으면 줄 기반 폴백
+  function parseReceiptText(text, words){
+    if(words && words.length) return parseReceiptWords(words);
+    return parseReceiptLines(text);
+  }
+
+  // 좌표 기반: 같은 y끼리 행으로 묶고, 행 안에서 이름/수량/금액 분리 (붙은 수량+금액도 분리)
+  function parseReceiptWords(words){
+    const ws = words.map((w) => ({ t: w.t, x: w.x, y: w.y })).sort((a, b) => a.y - b.y);
+    const rows = [];
+    ws.forEach((w) => {
+      let row = rows.find((r) => Math.abs(r.y - w.y) <= 15);
+      if(!row){ row = { y: w.y, ws: [] }; rows.push(row); }
+      row.ws.push(w);
+      row.y = (row.y * (row.ws.length - 1) + w.y) / row.ws.length;
+    });
+    const numTok = (t) => /^[0-9][0-9,\.]*$/.test(t);
+    const toNum = (t) => parseInt(t.replace(/[,\.]/g, ""), 10);
+    const items = [];
+    rows.forEach((row) => {
+      row.ws.sort((a, b) => a.x - b.x);
+      const joined = row.ws.map((w) => w.t).join("");
+      if(RECEIPT_IGNORE.some((w) => joined.toLowerCase().includes(w))) return;
+      const nameWords = row.ws.filter((w) => !numTok(w.t)).map((w) => w.t);
+      const numWords = row.ws.filter((w) => numTok(w.t)).map((w) => ({ v: toNum(w.t), x: w.x, raw: w.t })).filter((n) => !isNaN(n.v));
+      if(nameWords.length === 0 || numWords.length === 0) return;
+      let name = nameWords.join("");
+      if(name.length > 20) name = name.slice(0, 20);
+      numWords.sort((a, b) => a.x - b.x);
+      const amountTok = numWords[numWords.length - 1]; // 가장 오른쪽 = 금액
+      let amount = amountTok.v;
+      let qty = 1;
+      const qtyCand = numWords.slice(0, -1).find((n) => n.v >= 1 && n.v <= 99);
+      if(qtyCand){
+        qty = qtyCand.v;
+      } else {
+        // 수량+금액이 붙은 경우: 금액이 10만 이상이면 앞자리를 수량으로 분리
+        let s = amountTok.raw.replace(/[,\.]/g, "");
+        while(toNum(s) >= 100000 && s.length > 3){ qty = parseInt(s[0], 10) || 1; s = s.slice(1); }
+        amount = toNum(s);
+      }
+      if(isNaN(amount) || amount < 100 || amount > 5000000) return;
+      items.push({ name, lineTotal: amount, qty });
+    });
+    return items.slice(0, 50);
+  }
+
+  // 줄 기반 폴백 (좌표 없을 때)
+  function parseReceiptLines(text){
     const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
     const items = [];
     const ignoreWords = ["합계","총액","받을금액","받은금액","거스름","부가세","과세","면세","봉사료","카드","승인","현금","총구매","구매액","포인트","적립","할인","공급가","부가가치","결제","금액계","수량","단가","total","sum","tel","사업자","대표자","주소"];
