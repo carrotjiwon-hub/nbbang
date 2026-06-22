@@ -609,25 +609,34 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageBase64: base64 })
       });
-      if(!res.ok) throw new Error("OCR 서버 오류");
+      if(!res.ok) throw new Error("OCR 서버 오류 (HTTP " + res.status + ")");
       const { text } = await res.json();
       lastOcrText = text || "";
 
       ensureRounds();
-      const summary = applyReceiptToRound(parseReceiptText(text || ""), extractReceiptTotal(text || ""));
+      const parsed = parseReceiptText(text || "");
+      const total = extractReceiptTotal(text || "");
+      const summary = applyReceiptToRound(parsed, total);
       ocrStatusText.textContent = summary;
       save();
       if(location.search.includes("debug")){
-        // 디버그 모드: 원문을 화면에 남겨 복사할 수 있게 자동 이동 안 함
-        showOcrDebug(lastOcrText);
+        // 디버그 모드: 분류 내역 + 원문을 화면에 남겨 복사할 수 있게 자동 이동 안 함
+        showOcrDebug(lastOcrText, parsed, total);
         btnNext.disabled = false;
       } else {
         // 인식 후 반드시 품목 화면(Step 3)으로 이동해서 결과가 보이도록 함
         setTimeout(() => { ocrProgressBox.classList.add("hidden"); goToStep(3); }, 1000);
       }
     } catch(err){
-      ocrStatusText.textContent = "인식에 실패했어요. 다음 화면에서 직접 입력해주세요.";
-      setTimeout(() => { ocrProgressBox.classList.add("hidden"); goToStep(3); }, 1200);
+      if(location.search.includes("debug")){
+        // 디버그 모드: 실패해도 에러/원문을 화면에 남김
+        ocrStatusText.textContent = "인식 실패: " + (err && err.message ? err.message : err);
+        showOcrDebug(lastOcrText || "(서버 응답 없음 — " + (err && err.message ? err.message : err) + ")", [], 0);
+        btnNext.disabled = false;
+      } else {
+        ocrStatusText.textContent = "인식에 실패했어요. 다음 화면에서 직접 입력해주세요.";
+        setTimeout(() => { ocrProgressBox.classList.add("hidden"); goToStep(3); }, 1200);
+      }
     }
   }
 
@@ -756,11 +765,40 @@
   }
 
   // 디버그(?debug=1): OCR 원문을 복사 가능한 형태로 보여줌 (파싱 튜닝용)
-  function showOcrDebug(text){
+  function showOcrDebug(text, parsed, total){
+    parsed = parsed || [];
+    const byCat = { "맥주": [], "소주": [], "식사": [] };
+    parsed.forEach((it) => {
+      byCat[classifyReceiptName(it.name)].push(`${it.name}(${it.qty}개·${it.lineTotal})`);
+    });
+    const report =
+      `[파싱 결과] 인식된 줄 ${parsed.length}개 / 영수증총액 ${total || "?"}\n` +
+      `▶ 식사 ${byCat["식사"].length}개: ${byCat["식사"].join(", ") || "-"}\n` +
+      `▶ 맥주 ${byCat["맥주"].length}개: ${byCat["맥주"].join(", ") || "-"}\n` +
+      `▶ 소주 ${byCat["소주"].length}개: ${byCat["소주"].join(", ") || "-"}\n` +
+      `\n===== OCR 원문 (이 전체를 복사해서 개발자에게 보내주세요) =====\n` +
+      text;
+
+    // 기존 디버그 박스 제거 후 새로 표시
+    const prev = document.getElementById("ocrDebugBox");
+    if(prev) prev.remove();
+    const wrap = document.createElement("div");
+    wrap.id = "ocrDebugBox";
+    wrap.style.cssText = "margin-top:10px";
     const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.cssText = "width:100%;height:160px;margin-top:8px;font-size:11px;border:1px solid #ccc;border-radius:8px;padding:6px";
-    ocrProgressBox.appendChild(ta);
+    ta.value = report;
+    ta.readOnly = true;
+    ta.style.cssText = "width:100%;height:200px;font-size:11px;border:1px solid #ccc;border-radius:8px;padding:6px;white-space:pre";
+    const btn = document.createElement("button");
+    btn.textContent = "📋 원문 전체 복사";
+    btn.className = "btn-secondary w-full py-2 text-[13px] mt-2";
+    btn.addEventListener("click", () => {
+      ta.select();
+      navigator.clipboard?.writeText(report).then(() => { btn.textContent = "복사됨 ✓"; }).catch(() => {});
+    });
+    wrap.appendChild(ta);
+    wrap.appendChild(btn);
+    ocrProgressBox.appendChild(wrap);
   }
 
   $("#btnSkipOcr").addEventListener("click", () => {
