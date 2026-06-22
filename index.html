@@ -389,16 +389,27 @@
     recentMembersBox.classList.toggle("hidden", recent.length === 0);
     recentMembersList.innerHTML = "";
     recent.forEach((name) => {
+      const alreadyAdded = state.members.some((m) => m.name.trim() === name);
       const chip = document.createElement("button");
       chip.className = "chip";
-      chip.textContent = name;
-      chip.addEventListener("click", () => applyRecentMemberName(name));
+      chip.textContent = alreadyAdded ? `${name} ✓` : name;
+      if(alreadyAdded){
+        chip.style.opacity = "0.4";
+        chip.disabled = true;
+      } else {
+        chip.addEventListener("click", () => applyRecentMemberName(name));
+      }
       recentMembersList.appendChild(chip);
     });
   }
 
   // 빈(=기본 이름 그대로인) 멤버 슬롯에 채워 넣고, 슬롯이 없으면 인원을 한 명 늘려서 채움
   function applyRecentMemberName(name){
+    // 이미 같은 이름의 멤버가 있으면 중복 추가하지 않음
+    if(state.members.some((m) => m.name.trim() === name)){
+      renderRecentMembers();
+      return;
+    }
     const slot = state.members.find((m) => DEFAULT_NAME_RE.test(m.name.trim()));
     if(slot){
       slot.name = name;
@@ -407,6 +418,7 @@
       state.members[state.members.length - 1].name = name;
     }
     renderMembers();
+    renderRecentMembers();
     renderStepUI();
     save();
   }
@@ -489,6 +501,7 @@
           input.value = m.name;
           save();
         }
+        renderRecentMembers();
         renderItems();
         renderSettlement();
       });
@@ -497,6 +510,7 @@
       btn.addEventListener("click", () => {
         state.members = state.members.filter((m) => m.id !== btn.dataset.id);
         renderMembers();
+        renderRecentMembers();
         renderStepUI();
         save();
       });
