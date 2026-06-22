@@ -501,7 +501,6 @@
   function renderItems(){
     itemListEl.innerHTML = "";
     getActiveRound().items.forEach((item) => {
-      const thousands = Math.floor(item.price / 1000);
       const lineTotal = itemLineTotal(item);
       const isPerPerson = item.mode === "perPerson";
       const card = document.createElement("div");
@@ -514,10 +513,10 @@
         </div>
 
         <div class="flex items-center gap-1.5 mb-3">
-          <span class="text-xs text-[var(--toss-gray-500)] font-medium">${isPerPerson ? "1잔 단가" : "금액"}</span>
-          <input data-id="${item.id}" type="number" inputmode="numeric" value="${thousands}"
-            class="item-price-input w-[64px] px-2 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold text-right outline-none" />
-          <span class="text-[13px] text-[var(--toss-gray-500)] font-semibold">,000원</span>
+          <span class="text-xs text-[var(--toss-gray-500)] font-medium whitespace-nowrap">${isPerPerson ? "1잔 단가" : "금액"}</span>
+          <input data-id="${item.id}" type="text" inputmode="numeric" value="${item.price.toLocaleString("ko-KR")}"
+            class="item-price-input flex-1 px-3 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold text-right outline-none" />
+          <span class="text-[13px] text-[var(--toss-gray-500)] font-semibold">원</span>
         </div>
 
         ${isPerPerson ? `
@@ -560,13 +559,20 @@
       });
     });
     $$(".item-price-input").forEach((input) => {
+      input.addEventListener("focus", () => input.select());
+      input.addEventListener("click", () => input.select());
       input.addEventListener("input", () => {
         const item = getActiveRound().items.find((i) => i.id === input.dataset.id);
         if(!item) return;
-        item.price = (parseInt(input.value, 10) || 0) * 1000;
+        const digitsOnly = input.value.replace(/[^0-9]/g, "");
+        item.price = parseInt(digitsOnly, 10) || 0;
         updateSubtotalDisplay(item);
         updateItemsTotal();
         save();
+      });
+      input.addEventListener("blur", () => {
+        const item = getActiveRound().items.find((i) => i.id === input.dataset.id);
+        if(item) input.value = item.price.toLocaleString("ko-KR");
       });
     });
     $$(".qtyMinusBtn").forEach((btn) => {
