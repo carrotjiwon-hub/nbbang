@@ -423,6 +423,17 @@
     save();
   }
 
+  // 다른 멤버와 이름이 겹치면 뒤에 숫자를 붙여 고유하게 만듦 (중복 청구 방지)
+  function uniqueMemberName(name, selfId){
+    const base = name.trim();
+    if(!base) return base;
+    const others = state.members.filter((mm) => mm.id !== selfId).map((mm) => mm.name.trim());
+    if(!others.includes(base)) return base;
+    let n = 2;
+    while(others.includes(`${base}${n}`)) n++;
+    return `${base}${n}`;
+  }
+
   // 멤버 개수를 count에 맞추되, 기존에 수정한 이름은 그대로 유지
   function syncMembersToCount(count){
     const next = [];
@@ -495,9 +506,14 @@
       });
       input.addEventListener("blur", () => {
         const m = state.members.find((mm) => mm.id === input.dataset.id);
-        if(m && !m.name.trim()){
-          const idx = state.members.indexOf(m);
-          m.name = `멤버${idx + 1}`;
+        if(m){
+          if(!m.name.trim()){
+            const idx = state.members.indexOf(m);
+            m.name = `멤버${idx + 1}`;
+          } else {
+            // 다른 멤버와 이름이 겹치면 자동으로 숫자를 붙여 구분
+            m.name = uniqueMemberName(m.name, m.id);
+          }
           input.value = m.name;
           save();
         }
