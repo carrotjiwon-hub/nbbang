@@ -613,7 +613,7 @@
 
       ensureRounds();
       const parsed = parseReceiptText(text || "", words);
-      const total = extractReceiptTotal(text || "");
+      const total = (words && words.length) ? extractTotalFromWords(words) : extractReceiptTotal(text || "");
       const summary = applyReceiptToRound(parsed, total);
       ocrStatusText.textContent = summary;
       save();
@@ -646,45 +646,63 @@
     return parseReceiptLines(text);
   }
 
-  // 좌표 기반: 같은 y끼리 행으로 묶고, 행 안에서 이름/수량/금액 분리 (붙은 수량+금액도 분리)
-  function parseReceiptWords(words){
+  // 좌표 기반(기울어진 사진/4칸 영수증 대응): y로 행 묶고, 행 전체 텍스트에서 숫자 추출
+  function groupRows(words){
     const ws = words.map((w) => ({ t: w.t, x: w.x, y: w.y })).sort((a, b) => a.y - b.y);
     const rows = [];
     ws.forEach((w) => {
-      let row = rows.find((r) => Math.abs(r.y - w.y) <= 15);
+      let row = rows.find((r) => Math.abs(r.y - w.y) <= 18); // 기울임 여유 18px
       if(!row){ row = { y: w.y, ws: [] }; rows.push(row); }
       row.ws.push(w);
       row.y = (row.y * (row.ws.length - 1) + w.y) / row.ws.length;
     });
-    const numTok = (t) => /^[0-9][0-9,\.]*$/.test(t);
-    const toNum = (t) => parseInt(t.replace(/[,\.]/g, ""), 10);
+    rows.forEach((r) => r.ws.sort((a, b) => a.x - b.x));
+    return rows;
+  }
+  const rowTextOf = (r) => r.ws.map((w) => w.t).join(" ");
+  const extractNums = (s) => (s.match(/\d[\d,]*/g) || []).map((x) => parseInt(x.replace(/,/g, ""), 10)).filter((n) => !isNaN(n));
+
+  function parseReceiptWords(words){
+    const rows = groupRows(words);
     const items = [];
     rows.forEach((row) => {
-      row.ws.sort((a, b) => a.x - b.x);
-      const joined = row.ws.map((w) => w.t).join("");
-      if(RECEIPT_IGNORE.some((w) => joined.toLowerCase().includes(w))) return;
-      const nameWords = row.ws.filter((w) => !numTok(w.t)).map((w) => w.t);
-      const numWords = row.ws.filter((w) => numTok(w.t)).map((w) => ({ v: toNum(w.t), x: w.x, raw: w.t })).filter((n) => !isNaN(n.v));
-      if(nameWords.length === 0 || numWords.length === 0) return;
-      let name = nameWords.join("");
+      const txt = rowTextOf(row);
+      const flat = txt.replace(/\s/g, "").toLowerCase();
+      if(RECEIPT_IGNORE.some((w) => flat.includes(w))) return;
+      if(/\d{1,2}:\d{2}/.test(txt) || /20\d{2}[-.\/]\d{1,2}/.test(txt) || /\d{2,4}-\d{2,4}-\d{3,4}/.test(txt)) return;
+      const nums = extractNums(txt);
+      let name = txt.replace(/\d[\d,]*/g, " ").replace(/[^가-힣a-zA-Z]/g, " ").replace(/\s+/g, " ").trim();
+      if(!name || nums.length === 0) return;
       if(name.length > 20) name = name.slice(0, 20);
-      numWords.sort((a, b) => a.x - b.x);
-      const amountTok = numWords[numWords.length - 1]; // 가장 오른쪽 = 금액
-      let amount = amountTok.v;
+      let amount = nums[nums.length - 1]; // 가장 오른쪽(마지막) 숫자 = 금액 칸
       let qty = 1;
-      const qtyCand = numWords.slice(0, -1).find((n) => n.v >= 1 && n.v <= 99);
-      if(qtyCand){
-        qty = qtyCand.v;
+      const qc = nums.slice(0, -1).find((n) => n >= 1 && n <= 99); // 금액 아닌 1~99 = 수량
+      if(qc){
+        qty = qc;
       } else {
-        // 수량+금액이 붙은 경우: 금액이 10만 이상이면 앞자리를 수량으로 분리
-        let s = amountTok.raw.replace(/[,\.]/g, "");
-        while(toNum(s) >= 100000 && s.length > 3){ qty = parseInt(s[0], 10) || 1; s = s.slice(1); }
-        amount = toNum(s);
+        // 수량+금액이 한 덩어리로 붙은 경우(예: 149,000): 10만 이상이면 앞자리를 수량으로 분리
+        let s = String(amount);
+        while(amount >= 100000 && s.length > 3){ qty = parseInt(s[0], 10) || 1; s = s.slice(1); amount = parseInt(s, 10); }
       }
       if(isNaN(amount) || amount < 100 || amount > 5000000) return;
       items.push({ name, lineTotal: amount, qty });
     });
     return items.slice(0, 50);
+  }
+
+  // 좌표 기반 총액 추출(합계/받을금액 줄 — 기울어져 금액이 다음 줄에 떨어진 경우도 대응)
+  function extractTotalFromWords(words){
+    const rows = groupRows(words);
+    let total = 0;
+    rows.forEach((r, i) => {
+      const t = rowTextOf(r).replace(/\s/g, "");
+      if(/합계|받을금액|결제금액|총액|받은금액/.test(t)){
+        let n = extractNums(rowTextOf(r));
+        if(n.length){ total = Math.max(total, ...n); }
+        else if(rows[i + 1]){ const n2 = extractNums(rowTextOf(rows[i + 1])); if(n2.length) total = Math.max(total, ...n2); }
+      }
+    });
+    return total;
   }
 
   // 줄 기반 폴백 (좌표 없을 때)
