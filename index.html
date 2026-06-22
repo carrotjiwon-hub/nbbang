@@ -253,8 +253,20 @@
 
   // 영수증 품목 분류용 브랜드 사전 (소문자/공백제거 후 부분일치)
   // 주의: 흔한 일반단어(시원/곰표 등)나 청주류(청하/백화수복)는 오분류 방지를 위해 제외
-  const BEER_KEYWORDS = ["클라우드","카스","테라","하이트","켈리","오비","아사히","칭따오","칭다오","하이네켄","코로나","버드와이저","산미구엘","기네스","호가든","스텔라","필라이트","생맥","맥주","에일","라거","beer","cass","terra","kloud","kelly","ipa","hite","asahi","tsingtao"];
-  const SOJU_KEYWORDS = ["참이슬","진로","새로","처음처럼","좋은데이","잎새주","화요","한라산","대선","소주","jinro","chamisul"];
+  const BEER_KEYWORDS = [
+    // 맥주 일반/스타일
+    "맥주","생맥","흑맥주","에일","라거","스타우트","둔켈","바이젠","바이스","필스너","페일에일","논알콜맥주",
+    // 국산
+    "클라우드","카스","테라","하이트","켈리","오비","필라이트","곰표밀맥주","제주위트",
+    // 수입 (한글)
+    "아사히","삿포로","기린","산토리","칭따오","칭다오","하얼빈","하이네켄","코로나","버드와이저","밀러","산미구엘","기네스","호가든","스텔라","파울라너","바이엔슈테판","에딩거","크롬바커","벡스","블랑","크로넨버그","레페","듀벨","호프브로이","비트버거","칼스버그","타이거","싱하","아사히",
+    // 영문
+    "beer","ale","lager","stout","dunkel","weizen","weiss","pilsner","porter","lambic","gose","saison","cass","terra","kloud","kelly","hite","asahi","sapporo","kirin","suntory","tsingtao","harbin","heineken","corona","budweiser","miller","sanmiguel","guinness","hoegaarden","stella","artois","paulaner","weihenstephan","erdinger","krombacher","becks","kronenbourg","leffe","duvel","hofbrau","bitburger","carlsberg","tiger","singha","chang","bintang","peroni","moretti","estrella"
+  ];
+  const SOJU_KEYWORDS = [
+    "참이슬","진로","새로","처음처럼","좋은데이","잎새주","화요","한라산","대선","소주","안동소주","일품진로","진로이즈백",
+    "jinro","chamisul","soju","chumchurum","saero"
+  ];
 
   function classifyReceiptName(name){
     const s = (name || "").toLowerCase().replace(/\s/g, "");
