@@ -513,7 +513,7 @@
   // STEP 2: 영수증 촬영 -> Cloudflare Worker(서버리스) -> Google Vision OCR
   // ====================================================
   // 배포 후 실제 Worker 주소로 교체. 비어있으면 OCR 없이 "직접 입력"만 동작함
-  const OCR_ENDPOINT = "";
+  const OCR_ENDPOINT = "https://nbbang-ocr.carrot-jiwon.workers.dev";
 
   const receiptDropZone = $("#receiptDropZone");
   const receiptInput = $("#receiptInput");
