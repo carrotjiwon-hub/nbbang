@@ -165,15 +165,22 @@
     <!-- Step 3: 품목 수정 + 지분 매칭 -->
     <section id="step3" class="hidden fade-in pb-4">
       <h1 class="text-[22px] font-extrabold mb-1">누가 뭘 먹었나요?</h1>
-      <p class="text-sm text-[var(--toss-gray-500)] mb-5">품목/금액을 확인하고 멤버를 매칭해주세요</p>
+      <p class="text-sm text-[var(--toss-gray-500)] mb-5">1차, 2차로 나눠서 따로 입력할 수 있어요</p>
+
+      <div class="flex items-center gap-2 mb-4 overflow-x-auto" id="roundTabs"></div>
 
       <div id="itemList" class="space-y-3 mb-4"></div>
 
-      <button id="btnAddItem" class="w-full btn-secondary py-3 text-[14px] mb-6">+ 품목 추가</button>
+      <button id="btnAddItem" class="w-full btn-secondary py-3 text-[14px] mb-3">+ 품목 추가</button>
 
-      <div class="toss-card p-4 flex items-center justify-between">
-        <span class="text-sm font-semibold text-[var(--toss-gray-700)]">품목 합계</span>
+      <div class="toss-card p-4 flex items-center justify-between mb-3">
+        <span class="text-sm font-semibold text-[var(--toss-gray-700)]" id="roundTotalLabel">1차 합계</span>
         <span id="itemsTotal" class="text-[17px] font-extrabold">0원</span>
+      </div>
+
+      <div class="toss-card p-4 flex items-center justify-between" style="background:var(--toss-gray-100)">
+        <span class="text-sm font-bold">전체 합계 (1차+2차...)</span>
+        <span id="allRoundsTotal" class="text-[17px] font-extrabold">0원</span>
       </div>
     </section>
 
@@ -213,7 +220,8 @@
   const state = {
     step: 1,
     members: [],          // [{id,name,color}]
-    items: [],            // [{id, name, mode, price, assignedTo:[memberId,...], memberQty:{memberId:count}}]
+    rounds: [],            // [{id, name("1차","2차"...), items:[{id, name, mode, price, assignedTo, memberQty}]}]
+    activeRoundId: null,
     settlement: null
   };
 
@@ -243,6 +251,28 @@
       return item.price * totalQty;
     }
     return item.price;
+  }
+
+  function makeRound(name){
+    return { id: uid(), name, items: makeDefaultItems() };
+  }
+
+  function getActiveRound(){
+    return state.rounds.find((r) => r.id === state.activeRoundId) || state.rounds[0];
+  }
+
+  function getAllItems(){
+    return state.rounds.flatMap((r) => r.items);
+  }
+
+  function ensureRounds(){
+    if(state.rounds.length === 0){
+      const round = makeRound("1차");
+      state.rounds = [round];
+      state.activeRoundId = round.id;
+    } else if(!state.rounds.some((r) => r.id === state.activeRoundId)){
+      state.activeRoundId = state.rounds[0].id;
+    }
   }
 
   function uid(){ return Math.random().toString(36).slice(2,9); }
@@ -285,10 +315,10 @@
       btnNext.disabled = state.members.length < 1;
     } else if(state.step === 2){
       btnNext.textContent = "다음";
-      btnNext.disabled = state.items.length === 0;
+      btnNext.disabled = false;
     } else if(state.step === 3){
       btnNext.textContent = "정산하기";
-      btnNext.disabled = state.items.length === 0;
+      btnNext.disabled = getAllItems().length === 0;
     } else if(state.step === 4){
       btnNext.textContent = "새 정산 시작";
       btnNext.disabled = false;
@@ -298,7 +328,7 @@
 
   function goToStep(n){
     state.step = n;
-    if(n === 3) renderItems();
+    if(n === 3){ renderRoundTabs(); renderItems(); }
     if(n === 4) renderSettlement();
     renderStepUI();
     save();
@@ -421,20 +451,56 @@
   });
 
   $("#btnSkipOcr").addEventListener("click", () => {
-    if(state.items.length === 0){
-      state.items = makeDefaultItems();
-    }
+    ensureRounds();
     goToStep(3);
   });
 
   // ====================================================
-  // STEP 3: 품목 수정 + 멤버 지분 매칭
+  // STEP 3: 품목 수정 + 멤버 지분 매칭 (1차/2차... 회차별로 구분)
   // ====================================================
   const itemListEl = $("#itemList");
+  const roundTabsEl = $("#roundTabs");
+
+  function renderRoundTabs(){
+    ensureRounds();
+    roundTabsEl.innerHTML = "";
+    state.rounds.forEach((round) => {
+      const tab = document.createElement("button");
+      tab.className = `chip whitespace-nowrap ${round.id === state.activeRoundId ? "selected" : ""}`;
+      tab.dataset.id = round.id;
+      tab.textContent = round.name;
+      roundTabsEl.appendChild(tab);
+    });
+    const addTab = document.createElement("button");
+    addTab.id = "btnAddRound";
+    addTab.className = "chip whitespace-nowrap";
+    addTab.textContent = "+ 차 추가";
+    roundTabsEl.appendChild(addTab);
+
+    $$("#roundTabs .chip[data-id]").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        state.activeRoundId = tab.dataset.id;
+        renderRoundTabs();
+        renderItems();
+        save();
+      });
+    });
+    $("#btnAddRound").addEventListener("click", () => {
+      const round = makeRound(`${state.rounds.length + 1}차`);
+      state.rounds.push(round);
+      state.activeRoundId = round.id;
+      renderRoundTabs();
+      renderItems();
+      renderStepUI();
+      save();
+    });
+
+    $("#roundTotalLabel").textContent = `${getActiveRound().name} 합계`;
+  }
 
   function renderItems(){
     itemListEl.innerHTML = "";
-    state.items.forEach((item) => {
+    getActiveRound().items.forEach((item) => {
       const thousands = Math.floor(item.price / 1000);
       const lineTotal = itemLineTotal(item);
       const isPerPerson = item.mode === "perPerson";
@@ -489,13 +555,13 @@
 
     $$(".item-name-input").forEach((input) => {
       input.addEventListener("input", () => {
-        const item = state.items.find((i) => i.id === input.dataset.id);
+        const item = getActiveRound().items.find((i) => i.id === input.dataset.id);
         if(item){ item.name = input.value; save(); }
       });
     });
     $$(".item-price-input").forEach((input) => {
       input.addEventListener("input", () => {
-        const item = state.items.find((i) => i.id === input.dataset.id);
+        const item = getActiveRound().items.find((i) => i.id === input.dataset.id);
         if(!item) return;
         item.price = (parseInt(input.value, 10) || 0) * 1000;
         updateSubtotalDisplay(item);
@@ -505,7 +571,7 @@
     });
     $$(".qtyMinusBtn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const item = state.items.find((i) => i.id === btn.dataset.item);
+        const item = getActiveRound().items.find((i) => i.id === btn.dataset.item);
         if(!item) return;
         if(!item.memberQty) item.memberQty = {};
         const mid = btn.dataset.member;
@@ -518,7 +584,7 @@
     });
     $$(".qtyPlusBtn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const item = state.items.find((i) => i.id === btn.dataset.item);
+        const item = getActiveRound().items.find((i) => i.id === btn.dataset.item);
         if(!item) return;
         if(!item.memberQty) item.memberQty = {};
         const mid = btn.dataset.member;
@@ -531,7 +597,8 @@
     });
     $$(".removeItemBtn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        state.items = state.items.filter((i) => i.id !== btn.dataset.id);
+        const round = getActiveRound();
+        round.items = round.items.filter((i) => i.id !== btn.dataset.id);
         renderItems();
         renderStepUI();
         save();
@@ -539,7 +606,7 @@
     });
     $$(".member-chip").forEach((chip) => {
       chip.addEventListener("click", () => {
-        const item = state.items.find((i) => i.id === chip.dataset.item);
+        const item = getActiveRound().items.find((i) => i.id === chip.dataset.item);
         const memberId = chip.dataset.member;
         if(!item) return;
         const idx = item.assignedTo.indexOf(memberId);
@@ -563,12 +630,14 @@
   }
 
   function updateItemsTotal(){
-    const total = state.items.reduce((sum, i) => sum + itemLineTotal(i), 0);
-    $("#itemsTotal").textContent = won(total);
+    const roundTotal = getActiveRound().items.reduce((sum, i) => sum + itemLineTotal(i), 0);
+    $("#itemsTotal").textContent = won(roundTotal);
+    const grandTotal = getAllItems().reduce((sum, i) => sum + itemLineTotal(i), 0);
+    $("#allRoundsTotal").textContent = won(grandTotal);
   }
 
   $("#btnAddItem").addEventListener("click", () => {
-    state.items.push({ id: uid(), name: "새 품목", mode: "flat", price: 0, assignedTo: [], memberQty: {} });
+    getActiveRound().items.push({ id: uid(), name: "새 품목", mode: "flat", price: 0, assignedTo: [], memberQty: {} });
     renderItems();
     renderStepUI();
     save();
@@ -585,7 +654,7 @@
 
     let unassignedTotal = 0;
 
-    state.items.forEach((item) => {
+    getAllItems().forEach((item) => {
       if(item.mode === "perPerson"){
         // 인당 마신 잔수만큼 단가를 곱해서 각자에게 부과 (균등분배 아님)
         Object.entries(item.memberQty || {}).forEach(([mid, qty]) => {
@@ -615,7 +684,7 @@
       state.members.forEach((m) => totals[m.id] += evenShare);
     }
 
-    const grandTotal = state.items.reduce((sum, i) => sum + itemLineTotal(i), 0);
+    const grandTotal = getAllItems().reduce((sum, i) => sum + itemLineTotal(i), 0);
 
     return { totals, grandTotal };
   }
@@ -694,12 +763,10 @@
     if(btnNext.disabled) return;
 
     if(state.step === 1){
-      if(state.items.length === 0) state.items = makeDefaultItems();
+      ensureRounds();
       goToStep(2);
     } else if(state.step === 2){
-      if(state.items.length === 0){
-        state.items = makeDefaultItems();
-      }
+      ensureRounds();
       goToStep(3);
     } else if(state.step === 3){
       goToStep(4);
@@ -710,7 +777,8 @@
 
   function resetApp(){
     state.step = 1;
-    state.items = [];
+    state.rounds = [];
+    state.activeRoundId = null;
     state.settlement = null;
     state.paidStatus = {};
     countInput.value = 4;
@@ -752,7 +820,7 @@
   countInput.value = state.members.length || 4;
   if(state.members.length === 0) syncMembersToCount(4);
   else renderMembers();
-  if(state.items.length) renderItems();
+  if(state.rounds.length){ ensureRounds(); renderRoundTabs(); renderItems(); }
   renderStepUI();
 
 })();
