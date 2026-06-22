@@ -8,6 +8,7 @@
 <link rel="icon" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js"></script>
 <style>
   :root{
     --toss-blue:#3182f6;
@@ -155,11 +156,18 @@
       <h1 class="text-[22px] font-extrabold mb-1">영수증을 찍어주세요</h1>
       <p class="text-sm text-[var(--toss-gray-500)] mb-6">사진에서 품목과 금액을 자동으로 인식해요</p>
 
-      <div id="receiptDropZone" class="toss-card relative overflow-hidden flex flex-col items-center justify-center py-14 px-4 mb-4 opacity-60">
-        <span class="absolute top-3 right-3 chip" style="background:var(--toss-gray-300);border-color:var(--toss-gray-300);color:var(--toss-gray-700)">준비중</span>
+      <div id="receiptDropZone" class="toss-card flex flex-col items-center justify-center py-14 px-4 mb-4 cursor-pointer active:bg-[var(--toss-gray-100)]">
         <div class="text-5xl mb-3">📷</div>
         <div class="font-bold text-[15px] mb-1">카메라로 한번에 업로드</div>
-        <div class="text-xs text-[var(--toss-gray-500)]">영수증 자동 인식 기능을 준비하고 있어요</div>
+        <div class="text-xs text-[var(--toss-gray-500)]">영수증 사진을 찍으면 자동으로 인식해요</div>
+      </div>
+      <input id="receiptInput" type="file" accept="image/*" capture="environment" class="hidden" />
+
+      <img id="receiptPreview" class="hidden w-full rounded-[16px] mb-4 max-h-[280px] object-contain bg-[var(--toss-gray-100)]" />
+
+      <div id="ocrProgressBox" class="hidden toss-card p-5 mb-4 flex flex-col items-center gap-3">
+        <div class="spinner"></div>
+        <div class="text-sm font-semibold" id="ocrStatusText">영수증을 읽고 있어요...</div>
       </div>
 
       <button id="btnSkipOcr" class="btn-primary w-full py-4 text-[16px]">
@@ -199,9 +207,14 @@
         <div id="dashTotal" class="text-white text-[28px] font-extrabold">0원</div>
       </div>
 
-      <button id="btnCopyAll" class="btn-secondary w-full py-3 text-[14px] mb-5">
-        📋 전체 정산내역 복사 <span class="text-[var(--toss-gray-500)] font-normal">(단톡방에 붙여넣기용)</span>
-      </button>
+      <div class="flex gap-2 mb-5">
+        <button id="btnCopyAll" class="btn-secondary flex-1 py-3 text-[14px]">
+          📋 전체 내역 복사
+        </button>
+        <button id="btnKakaoShareAll" class="flex-1 py-3 text-[14px] font-semibold rounded-[14px]" style="background:#fee500;color:#191600">
+          💬 단톡방에 카톡 공유
+        </button>
+      </div>
 
       <div id="settleList" class="space-y-3"></div>
     </section>
@@ -497,13 +510,96 @@
   }
 
   // ====================================================
-  // STEP 2: 영수증 촬영 (카메라 OCR은 준비중)
+  // STEP 2: 영수증 촬영 -> Cloudflare Worker(서버리스) -> Google Vision OCR
   // ====================================================
+  // 배포 후 실제 Worker 주소로 교체. 비어있으면 OCR 없이 "직접 입력"만 동작함
+  const OCR_ENDPOINT = "";
+
   const receiptDropZone = $("#receiptDropZone");
+  const receiptInput = $("#receiptInput");
+  const receiptPreview = $("#receiptPreview");
+  const ocrProgressBox = $("#ocrProgressBox");
+  const ocrStatusText = $("#ocrStatusText");
 
   receiptDropZone.addEventListener("click", () => {
-    alert("카메라로 한번에 업로드 기능은 현재 준비중이에요. 아래 '직접 입력할게요'로 진행해주세요!");
+    if(!OCR_ENDPOINT){
+      alert("영수증 자동인식 서버가 아직 연결되지 않았어요. 아래 '직접 입력할게요'로 진행해주세요!");
+      return;
+    }
+    receiptInput.click();
   });
+
+  receiptInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      receiptPreview.src = reader.result;
+      receiptPreview.classList.remove("hidden");
+      const base64 = reader.result.split(",")[1];
+      runOcr(base64);
+    };
+    reader.readAsDataURL(file);
+  });
+
+  async function runOcr(base64){
+    ocrProgressBox.classList.remove("hidden");
+    ocrStatusText.textContent = "영수증을 읽고 있어요...";
+    btnNext.disabled = true;
+
+    try{
+      const res = await fetch(OCR_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64 })
+      });
+      if(!res.ok) throw new Error("OCR 서버 오류");
+      const { text } = await res.json();
+
+      ensureRounds();
+      const parsedItems = parseReceiptText(text || "");
+      if(parsedItems.length > 0){
+        const round = getActiveRound();
+        const parsedNames = new Set(parsedItems.map((i) => i.name));
+        round.items = [...round.items.filter((i) => !parsedNames.has(i.name)), ...parsedItems];
+      }
+      ocrStatusText.textContent = "인식 완료!";
+      save();
+      setTimeout(() => { ocrProgressBox.classList.add("hidden"); renderStepUI(); }, 400);
+    } catch(err){
+      ocrStatusText.textContent = "인식에 실패했어요. 직접 입력해주세요.";
+      setTimeout(() => { ocrProgressBox.classList.add("hidden"); renderStepUI(); }, 1200);
+    }
+  }
+
+  // 영수증 텍스트에서 "품목명 ... 금액" 패턴 추출
+  function parseReceiptText(text){
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    const items = [];
+    const priceRegex = /([0-9][0-9,\.]{2,})\s*원?$/;
+    const ignoreWords = ["합계","총액","받을금액","받은금액","거스름","부가세","과세","카드","승인","현금","총구매","포인트","할인","total","sum"];
+
+    lines.forEach((line) => {
+      const lower = line.toLowerCase();
+      if(ignoreWords.some((w) => lower.includes(w))) return;
+
+      const match = line.match(priceRegex);
+      if(!match) return;
+
+      const rawPrice = match[1].replace(/[,\.]/g, "");
+      const price = parseInt(rawPrice, 10);
+      if(isNaN(price) || price < 100 || price > 5000000) return;
+
+      let name = line.slice(0, match.index).trim();
+      name = name.replace(/[\*\-_:]+$/, "").trim();
+      if(!name) name = "품목";
+      if(name.length > 20) name = name.slice(0, 20);
+
+      items.push({ id: uid(), name, mode: "flat", price, assignedTo: [], memberQty: {} });
+    });
+
+    return items.slice(0, 30);
+  }
 
   $("#btnSkipOcr").addEventListener("click", () => {
     ensureRounds();
@@ -770,7 +866,8 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <button class="copyOneBtn chip" data-id="${m.id}" style="border-color:#fee500;background:#fee500;color:#191600">개별 안내 복사</button>
+          <button class="kakaoShareOneBtn chip" data-id="${m.id}" style="border-color:#fee500;background:#fee500;color:#191600">💬 카톡</button>
+          <button class="copyOneBtn chip" data-id="${m.id}">복사</button>
           <button class="paidBtn chip ${paid ? "selected" : ""}" data-id="${m.id}" style="${paid ? "background:#00c781;border-color:#00c781;color:#fff" : ""}">${paid ? "완료 ✓" : "입금완료"}</button>
         </div>
       `;
@@ -778,6 +875,7 @@
     });
 
     $$(".copyOneBtn").forEach((btn) => btn.addEventListener("click", () => copyIndividualMessage(btn.dataset.id)));
+    $$(".kakaoShareOneBtn").forEach((btn) => btn.addEventListener("click", () => kakaoShareIndividual(btn.dataset.id)));
     $$(".paidBtn").forEach((btn) => btn.addEventListener("click", () => {
       if(!state.paidStatus) state.paidStatus = {};
       state.paidStatus[btn.dataset.id] = !state.paidStatus[btn.dataset.id];
@@ -786,17 +884,14 @@
     }));
   }
 
-  // 개별 멤버에게 카톡으로 보낼 정산 안내 문구를 클립보드에 복사 (실제 발송 기능 아님)
-  function copyIndividualMessage(memberId){
+  function individualMessageText(memberId){
     const member = state.members.find((m) => m.id === memberId);
-    if(!member) return;
+    if(!member) return "";
     const amount = (state.settlement && state.settlement[memberId]) || 0;
-    const text = `[엔빵 정산] ${member.name}님, 정산 금액은 ${won(amount)} 입니다.`;
-    copyToClipboard(text, "개별 정산 안내 메시지가 복사되었어요. 카카오톡 채팅창에 붙여넣어 보내주세요!");
+    return `[엔빵 정산] ${member.name}님, 정산 금액은 ${won(amount)} 입니다.`;
   }
 
-  // 전체 멤버의 정산 내역을 하나의 메시지로 모아 클립보드에 복사 (단톡방 공유용)
-  function copyAllSettlementMessage(){
+  function allSettlementMessageText(){
     const { totals, grandTotal } = computeSettlement();
     const lines = [
       "[엔빵 정산 안내]",
@@ -804,7 +899,17 @@
       "",
       ...state.members.map((m) => `- ${m.name}: ${won(totals[m.id] || 0)}`)
     ];
-    copyToClipboard(lines.join("\n"), "전체 정산내역이 복사되었어요. 단톡방에 붙여넣어 공유해주세요!");
+    return lines.join("\n");
+  }
+
+  // 개별 멤버에게 카톡으로 보낼 정산 안내 문구를 클립보드에 복사 (실제 발송 기능 아님)
+  function copyIndividualMessage(memberId){
+    copyToClipboard(individualMessageText(memberId), "개별 정산 안내 메시지가 복사되었어요. 카카오톡 채팅창에 붙여넣어 보내주세요!");
+  }
+
+  // 전체 멤버의 정산 내역을 하나의 메시지로 모아 클립보드에 복사 (단톡방 공유용)
+  function copyAllSettlementMessage(){
+    copyToClipboard(allSettlementMessageText(), "전체 정산내역이 복사되었어요. 단톡방에 붙여넣어 공유해주세요!");
   }
 
   function copyToClipboard(text, successMessage){
@@ -816,6 +921,32 @@
   }
 
   $("#btnCopyAll").addEventListener("click", copyAllSettlementMessage);
+
+  // ---------- 카카오톡 공유하기 ----------
+  // 카카오 개발자센터에서 발급받은 JavaScript 키로 교체. 비어있으면 카톡 공유 대신 복사로 안내
+  const KAKAO_JS_KEY = "";
+
+  if(KAKAO_JS_KEY && window.Kakao && !window.Kakao.isInitialized()){
+    window.Kakao.init(KAKAO_JS_KEY);
+  }
+
+  function kakaoShareText(text){
+    if(!KAKAO_JS_KEY || !window.Kakao || !window.Kakao.isInitialized()){
+      copyToClipboard(text, "카카오 공유가 아직 연결되지 않아 메시지를 복사했어요. 카카오톡에 붙여넣어 보내주세요!");
+      return;
+    }
+    window.Kakao.Share.sendDefault({
+      objectType: "text",
+      text,
+      link: { mobileWebUrl: location.href, webUrl: location.href }
+    });
+  }
+
+  function kakaoShareIndividual(memberId){
+    kakaoShareText(individualMessageText(memberId));
+  }
+
+  $("#btnKakaoShareAll").addEventListener("click", () => kakaoShareText(allSettlementMessageText()));
 
   // ====================================================
   // 하단 고정 버튼 흐름 제어
