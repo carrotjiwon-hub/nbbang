@@ -252,13 +252,15 @@
   ];
 
   // 영수증 품목 분류용 브랜드 사전 (소문자/공백제거 후 부분일치)
-  const BEER_KEYWORDS = ["클라우드","카스","테라","하이트","켈리","오비","아사히","칭따오","칭다오","하이네켄","코로나","버드와이저","산미구엘","기네스","호가든","스텔라","필라이트","곰표","생맥","맥주","에일","라거","페일","beer","cass","terra","kloud","kelly"];
-  const SOJU_KEYWORDS = ["참이슬","진로","새로","처음처럼","좋은데이","잎새주","화요","한라산","대선","시원","소주","청하","백화수복","경주법주"];
+  // 주의: 흔한 일반단어(시원/곰표 등)나 청주류(청하/백화수복)는 오분류 방지를 위해 제외
+  const BEER_KEYWORDS = ["클라우드","카스","테라","하이트","켈리","오비","아사히","칭따오","칭다오","하이네켄","코로나","버드와이저","산미구엘","기네스","호가든","스텔라","필라이트","생맥","맥주","에일","라거","beer","cass","terra","kloud","kelly","ipa","hite","asahi","tsingtao"];
+  const SOJU_KEYWORDS = ["참이슬","진로","새로","처음처럼","좋은데이","잎새주","화요","한라산","대선","소주","jinro","chamisul"];
 
   function classifyReceiptName(name){
     const s = (name || "").toLowerCase().replace(/\s/g, "");
-    if(BEER_KEYWORDS.some((k) => s.includes(k))) return "맥주";
-    if(SOJU_KEYWORDS.some((k) => s.includes(k))) return "소주";
+    // 우선순위: 맥주 → 소주 → 식사 (한 품목은 정확히 하나의 카테고리 = 상호배타)
+    if(BEER_KEYWORDS.some((k) => s.includes(k.toLowerCase()))) return "맥주";
+    if(SOJU_KEYWORDS.some((k) => s.includes(k.toLowerCase()))) return "소주";
     return "식사";
   }
 
@@ -600,7 +602,7 @@
       lastOcrText = text || "";
 
       ensureRounds();
-      const summary = applyReceiptToRound(parseReceiptText(text || ""));
+      const summary = applyReceiptToRound(parseReceiptText(text || ""), extractReceiptTotal(text || ""));
       ocrStatusText.textContent = summary;
       save();
       if(location.search.includes("debug")){
@@ -657,8 +659,24 @@
     return items.slice(0, 50);
   }
 
+  // 영수증의 '합계/총액/받을금액' 줄에서 최종 총액을 뽑음 (검증 기준값)
+  function extractReceiptTotal(text){
+    const totalWords = ["합계","총액","받을금액","결제금액","판매금액","총금액","받은금액"];
+    let total = 0;
+    text.split("\n").map((l) => l.replace(/\s/g, "")).forEach((line) => {
+      if(!totalWords.some((w) => line.includes(w))) return;
+      const nums = (line.match(/[0-9][0-9,\.]*/g) || [])
+        .map((s) => parseInt(s.replace(/[,\.]/g, ""), 10))
+        .filter((n) => !isNaN(n) && n >= 100 && n <= 5000000);
+      if(nums.length) total = Math.max(total, ...nums);
+    });
+    return total;
+  }
+
   // 인식된 품목들을 맥주/소주/식사로 분류·합산해서 현재 회차의 항목에 채움. 결과 요약 문자열 반환
-  function applyReceiptToRound(parsedItems){
+  function applyReceiptToRound(parsedItems, receiptTotal){
+    const round = getActiveRound();
+    round.ocrCheck = null; // 이전 검증결과 초기화
     if(!parsedItems || parsedItems.length === 0){
       return "인식된 품목이 없어요. 다음 화면에서 직접 입력해주세요.";
     }
@@ -673,7 +691,6 @@
       else { mealTotal += it.lineTotal; }
     });
 
-    const round = getActiveRound();
     const allMemberIds = state.members.map((m) => m.id);
     function getOrCreate(name, mode, defPrice){
       let item = round.items.find((i) => i.name.trim() === name);
@@ -709,6 +726,20 @@
     if(parts.length === 0){
       return "금액을 인식하지 못했어요. 다음 화면에서 직접 입력해주세요.";
     }
+
+    // ── 검증: 3분류 합계가 영수증 총액과 일치하는지 ──
+    const classifiedSum = mealTotal + beer.amt + soju.amt;
+    if(receiptTotal > 0){
+      const diff = classifiedSum - receiptTotal;
+      const tolerance = Math.max(100, Math.round(receiptTotal * 0.02)); // 2% 또는 100원 오차 허용
+      round.ocrCheck = {
+        classifiedSum,
+        receiptTotal,
+        ok: Math.abs(diff) <= tolerance,
+        diff
+      };
+    }
+
     return `인식 완료! ${parts.join(" · ")} — 누가 몇 잔/병인지는 다음 화면에서 입력해주세요.`;
   }
 
@@ -770,6 +801,24 @@
 
   function renderItems(){
     itemListEl.innerHTML = "";
+
+    // 영수증 검증 배너: 3분류 합계 vs 영수증 총액
+    const check = getActiveRound().ocrCheck;
+    if(check){
+      const banner = document.createElement("div");
+      if(check.ok){
+        banner.className = "mb-3 px-4 py-3 rounded-[12px] text-[13px] font-semibold";
+        banner.style.cssText = "background:#e7f9f0;color:#00875a";
+        banner.textContent = `✅ 영수증 총액(${won(check.receiptTotal)})과 분류 합계가 일치해요`;
+      } else {
+        const more = check.diff > 0 ? "분류가 더 많음" : "분류가 더 적음";
+        banner.className = "mb-3 px-4 py-3 rounded-[12px] text-[13px] font-semibold";
+        banner.style.cssText = "background:#fff4e5;color:#c2410c";
+        banner.innerHTML = `⚠️ 분류 합계 <b>${won(check.classifiedSum)}</b> ≠ 영수증 총액 <b>${won(check.receiptTotal)}</b> (${more}, 차이 ${won(Math.abs(check.diff))})<br>금액이 누락·중복됐을 수 있어요. 아래 항목을 확인해주세요.`;
+      }
+      itemListEl.appendChild(banner);
+    }
+
     getActiveRound().items.forEach((item) => {
       const lineTotal = itemLineTotal(item);
       const isPerPerson = item.mode === "perPerson";
