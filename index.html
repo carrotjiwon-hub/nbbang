@@ -558,17 +558,22 @@
 
       ensureRounds();
       const parsedItems = parseReceiptText(text || "");
+      let addedCount = 0;
       if(parsedItems.length > 0){
         const round = getActiveRound();
         const parsedNames = new Set(parsedItems.map((i) => i.name));
         round.items = [...round.items.filter((i) => !parsedNames.has(i.name)), ...parsedItems];
+        addedCount = parsedItems.length;
       }
-      ocrStatusText.textContent = "인식 완료!";
+      ocrStatusText.textContent = addedCount > 0
+        ? `${addedCount}개 품목을 인식했어요!`
+        : "인식된 품목이 없어요. 다음 화면에서 직접 입력해주세요.";
       save();
-      setTimeout(() => { ocrProgressBox.classList.add("hidden"); renderStepUI(); }, 400);
+      // 인식 후 반드시 품목 화면(Step 3)으로 이동해서 결과가 보이도록 함
+      setTimeout(() => { ocrProgressBox.classList.add("hidden"); goToStep(3); }, 800);
     } catch(err){
-      ocrStatusText.textContent = "인식에 실패했어요. 직접 입력해주세요.";
-      setTimeout(() => { ocrProgressBox.classList.add("hidden"); renderStepUI(); }, 1200);
+      ocrStatusText.textContent = "인식에 실패했어요. 다음 화면에서 직접 입력해주세요.";
+      setTimeout(() => { ocrProgressBox.classList.add("hidden"); goToStep(3); }, 1200);
     }
   }
 
@@ -931,15 +936,21 @@
   }
 
   function kakaoShareText(text){
+    const fallbackMsg = "카카오 공유를 열 수 없어 메시지를 복사했어요. 카카오톡 채팅창에 붙여넣어 보내주세요!";
     if(!KAKAO_JS_KEY || !window.Kakao || !window.Kakao.isInitialized()){
-      copyToClipboard(text, "카카오 공유가 아직 연결되지 않아 메시지를 복사했어요. 카카오톡에 붙여넣어 보내주세요!");
+      copyToClipboard(text, fallbackMsg);
       return;
     }
-    window.Kakao.Share.sendDefault({
-      objectType: "text",
-      text,
-      link: { mobileWebUrl: location.href, webUrl: location.href }
-    });
+    // 카카오 공유가 실패해도 절대 막히지 않도록 복사로 폴백
+    try{
+      window.Kakao.Share.sendDefault({
+        objectType: "text",
+        text,
+        link: { mobileWebUrl: location.href, webUrl: location.href }
+      });
+    } catch(err){
+      copyToClipboard(text, fallbackMsg);
+    }
   }
 
   function kakaoShareIndividual(memberId){
