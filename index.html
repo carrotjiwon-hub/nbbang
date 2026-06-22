@@ -142,6 +142,11 @@
         <button id="btnCountPlus" class="btn-secondary w-12 h-12 text-[20px] font-bold">+</button>
       </div>
 
+      <div id="recentMembersBox" class="hidden mb-4">
+        <p class="text-xs text-[var(--toss-gray-500)] font-medium mb-2">최근 사용한 멤버 (눌러서 빠르게 채우기)</p>
+        <div id="recentMembersList" class="flex flex-wrap gap-2"></div>
+      </div>
+
       <div id="memberList" class="space-y-2 mb-4"></div>
     </section>
 
@@ -340,8 +345,58 @@
   // ====================================================
   const countInput = $("#countInput");
   const memberListEl = $("#memberList");
+  const recentMembersBox = $("#recentMembersBox");
+  const recentMembersList = $("#recentMembersList");
+  const DEFAULT_NAME_RE = /^멤버\d+$/;
+  const RECENT_MEMBERS_KEY = "nbbang_recent_members";
 
   function clampCount(n){ return Math.min(20, Math.max(1, n)); }
+
+  function loadRecentMembers(){
+    try{ return JSON.parse(localStorage.getItem(RECENT_MEMBERS_KEY)) || []; }
+    catch(e){ return []; }
+  }
+
+  function saveRecentMembers(names){
+    try{ localStorage.setItem(RECENT_MEMBERS_KEY, JSON.stringify(names.slice(0, 20))); }
+    catch(e){}
+  }
+
+  // 이번 정산에서 실제로 이름을 바꾼(=기본값이 아닌) 멤버만 "최근 멤버"로 기록
+  function rememberCurrentMembers(){
+    const customNames = state.members.map((m) => m.name.trim()).filter((n) => n && !DEFAULT_NAME_RE.test(n));
+    if(customNames.length === 0) return;
+    const existing = loadRecentMembers();
+    const merged = [...customNames, ...existing.filter((n) => !customNames.includes(n))];
+    saveRecentMembers(merged);
+  }
+
+  function renderRecentMembers(){
+    const recent = loadRecentMembers();
+    recentMembersBox.classList.toggle("hidden", recent.length === 0);
+    recentMembersList.innerHTML = "";
+    recent.forEach((name) => {
+      const chip = document.createElement("button");
+      chip.className = "chip";
+      chip.textContent = name;
+      chip.addEventListener("click", () => applyRecentMemberName(name));
+      recentMembersList.appendChild(chip);
+    });
+  }
+
+  // 빈(=기본 이름 그대로인) 멤버 슬롯에 채워 넣고, 슬롯이 없으면 인원을 한 명 늘려서 채움
+  function applyRecentMemberName(name){
+    const slot = state.members.find((m) => DEFAULT_NAME_RE.test(m.name.trim()));
+    if(slot){
+      slot.name = name;
+    } else {
+      setCount(state.members.length + 1);
+      state.members[state.members.length - 1].name = name;
+    }
+    renderMembers();
+    renderStepUI();
+    save();
+  }
 
   // 멤버 개수를 count에 맞추되, 기존에 수정한 이름은 그대로 유지
   function syncMembersToCount(count){
@@ -769,6 +824,7 @@
     if(btnNext.disabled) return;
 
     if(state.step === 1){
+      rememberCurrentMembers();
       ensureRounds();
       goToStep(2);
     } else if(state.step === 2){
@@ -789,6 +845,7 @@
     state.paidStatus = {};
     countInput.value = 4;
     syncMembersToCount(4);
+    renderRecentMembers();
     renderStepUI();
     save();
   }
@@ -826,6 +883,7 @@
   countInput.value = state.members.length || 4;
   if(state.members.length === 0) syncMembersToCount(4);
   else renderMembers();
+  renderRecentMembers();
   if(state.rounds.length){ ensureRounds(); renderRoundTabs(); renderItems(); }
   renderStepUI();
 
