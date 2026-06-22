@@ -8,7 +8,6 @@
 <link rel="icon" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js"></script>
 <style>
   :root{
     --toss-blue:#3182f6;
@@ -153,13 +152,14 @@
 
     <!-- Step 2: 영수증 촬영 -->
     <section id="step2" class="hidden fade-in">
-      <h1 class="text-[22px] font-extrabold mb-1">영수증을 찍어주세요</h1>
-      <p class="text-sm text-[var(--toss-gray-500)] mb-6">사진에서 품목과 금액을 자동으로 인식해요</p>
+      <h1 class="text-[22px] font-extrabold mb-1">금액을 입력할게요</h1>
+      <p class="text-sm text-[var(--toss-gray-500)] mb-6">다음 화면에서 식사·맥주·소주 금액을 입력해요</p>
 
-      <div id="receiptDropZone" class="toss-card flex flex-col items-center justify-center py-14 px-4 mb-4 cursor-pointer active:bg-[var(--toss-gray-100)]">
+      <div id="receiptDropZone" class="toss-card relative overflow-hidden flex flex-col items-center justify-center py-14 px-4 mb-4 opacity-60">
+        <span class="absolute top-3 right-3 chip" style="background:var(--toss-gray-300);border-color:var(--toss-gray-300);color:var(--toss-gray-700)">준비중</span>
         <div class="text-5xl mb-3">📷</div>
         <div class="font-bold text-[15px] mb-1">카메라로 한번에 업로드</div>
-        <div class="text-xs text-[var(--toss-gray-500)]">영수증 사진을 찍으면 자동으로 인식해요</div>
+        <div class="text-xs text-[var(--toss-gray-500)]">영수증 자동 인식 기능을 준비하고 있어요</div>
       </div>
       <input id="receiptInput" type="file" accept="image/*" capture="environment" class="hidden" />
 
@@ -171,7 +171,7 @@
       </div>
 
       <button id="btnSkipOcr" class="btn-primary w-full py-4 text-[16px]">
-        직접 입력할게요
+        직접 입력하기
       </button>
     </section>
 
@@ -207,12 +207,9 @@
         <div id="dashTotal" class="text-white text-[28px] font-extrabold">0원</div>
       </div>
 
-      <div class="flex gap-2 mb-5">
-        <button id="btnCopyAll" class="btn-secondary flex-1 py-3 text-[14px]">
-          📋 전체 내역 복사
-        </button>
-        <button id="btnKakaoShareAll" class="flex-1 py-3 text-[14px] font-semibold rounded-[14px]" style="background:#fee500;color:#191600">
-          💬 단톡방에 카톡 공유
+      <div class="mb-5">
+        <button id="btnCopyAll" class="btn-primary w-full py-3 text-[15px]">
+          📋 전체 정산내역 복사 <span class="font-normal opacity-80">(단톡방에 붙여넣기)</span>
         </button>
       </div>
 
@@ -578,8 +575,9 @@
   const ocrStatusText = $("#ocrStatusText");
 
   receiptDropZone.addEventListener("click", () => {
-    if(!OCR_ENDPOINT){
-      alert("영수증 자동인식 서버가 아직 연결되지 않았어요. 아래 '직접 입력할게요'로 진행해주세요!");
+    // 영수증 자동인식은 정확도 개선 전까지 비활성화 (개발/테스트는 ?debug=1 에서만)
+    if(!OCR_ENDPOINT || !location.search.includes("debug")){
+      alert("영수증 자동인식은 준비 중이에요. 아래 '직접 입력하기'로 진행해주세요!");
       return;
     }
     receiptInput.click();
@@ -1139,7 +1137,6 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <button class="kakaoShareOneBtn chip" data-id="${m.id}" style="border-color:#fee500;background:#fee500;color:#191600">💬 카톡</button>
           <button class="copyOneBtn chip" data-id="${m.id}">복사</button>
           <button class="paidBtn chip ${paid ? "selected" : ""}" data-id="${m.id}" style="${paid ? "background:#00c781;border-color:#00c781;color:#fff" : ""}">${paid ? "완료 ✓" : "입금완료"}</button>
         </div>
@@ -1148,7 +1145,6 @@
     });
 
     $$(".copyOneBtn").forEach((btn) => btn.addEventListener("click", () => copyIndividualMessage(btn.dataset.id)));
-    $$(".kakaoShareOneBtn").forEach((btn) => btn.addEventListener("click", () => kakaoShareIndividual(btn.dataset.id)));
     $$(".paidBtn").forEach((btn) => btn.addEventListener("click", () => {
       if(!state.paidStatus) state.paidStatus = {};
       state.paidStatus[btn.dataset.id] = !state.paidStatus[btn.dataset.id];
@@ -1195,37 +1191,7 @@
 
   $("#btnCopyAll").addEventListener("click", copyAllSettlementMessage);
 
-  // ---------- 카카오톡 공유하기 ----------
-  // 카카오 개발자센터에서 발급받은 JavaScript 키로 교체. 비어있으면 카톡 공유 대신 복사로 안내
-  const KAKAO_JS_KEY = "120bba31c77d884ae0265cf150b20f75";
-
-  if(KAKAO_JS_KEY && window.Kakao && !window.Kakao.isInitialized()){
-    window.Kakao.init(KAKAO_JS_KEY);
-  }
-
-  function kakaoShareText(text){
-    const fallbackMsg = "카카오 공유를 열 수 없어 메시지를 복사했어요. 카카오톡 채팅창에 붙여넣어 보내주세요!";
-    if(!KAKAO_JS_KEY || !window.Kakao || !window.Kakao.isInitialized()){
-      copyToClipboard(text, fallbackMsg);
-      return;
-    }
-    // 카카오 공유가 실패해도 절대 막히지 않도록 복사로 폴백
-    try{
-      window.Kakao.Share.sendDefault({
-        objectType: "text",
-        text,
-        link: { mobileWebUrl: location.href, webUrl: location.href }
-      });
-    } catch(err){
-      copyToClipboard(text, fallbackMsg);
-    }
-  }
-
-  function kakaoShareIndividual(memberId){
-    kakaoShareText(individualMessageText(memberId));
-  }
-
-  $("#btnKakaoShareAll").addEventListener("click", () => kakaoShareText(allSettlementMessageText()));
+  // 카카오톡 공유는 도메인 등록(제품 링크 관리) 완료 전까지 비활성화 — 현재는 복사 기능만 사용
 
   // ====================================================
   // 하단 고정 버튼 흐름 제어
