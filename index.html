@@ -657,6 +657,7 @@
       if(!res.ok) throw new Error("OCR 서버 오류 (HTTP " + res.status + ")");
       const { text, words } = await res.json();
       lastOcrText = text || "";
+      lastOcrWords = words || null;
 
       ensureRounds();
       const parsed = parseReceiptText(text || "", words);
@@ -737,19 +738,28 @@
     return items.slice(0, 50);
   }
 
-  // 좌표 기반 총액 추출(합계/받을금액 줄 — 기울어져 금액이 다음 줄에 떨어진 경우도 대응)
+  // 좌표 기반 총액 추출: ①합계/받을금액 키워드 줄 → ②실패 시 '가장 자주 나오는 큰 숫자'(보통 합계가 여러번 반복됨)
   function extractTotalFromWords(words){
     const rows = groupRows(words);
     let total = 0;
+    // ① 키워드 기반 (압계 등 오인식도 포함)
     rows.forEach((r, i) => {
       const t = rowTextOf(r).replace(/\s/g, "");
-      if(/합계|받을금액|결제금액|총액|받은금액/.test(t)){
-        let n = extractNums(rowTextOf(r));
+      if(/합계|압계|함계|받을금액|받울금액|결제금액|총액|받은금액|승인금액/.test(t)){
+        let n = extractNums(rowTextOf(r)).filter((x) => x >= 1000);
         if(n.length){ total = Math.max(total, ...n); }
-        else if(rows[i + 1]){ const n2 = extractNums(rowTextOf(rows[i + 1])); if(n2.length) total = Math.max(total, ...n2); }
+        else if(rows[i + 1]){ const n2 = extractNums(rowTextOf(rows[i + 1])).filter((x) => x >= 1000); if(n2.length) total = Math.max(total, ...n2); }
       }
     });
-    return total;
+    if(total > 0) return total;
+    // ② 폴백: 영수증 전체에서 1000원 이상 숫자의 '최빈 큰 값'(합계는 보통 여러번 반복됨)
+    const freq = {};
+    rows.forEach((r) => extractNums(rowTextOf(r)).forEach((n) => { if(n >= 1000 && n <= 5000000) freq[n] = (freq[n] || 0) + 1; }));
+    const entries = Object.entries(freq).map(([v, c]) => ({ v: parseInt(v, 10), c }));
+    const repeated = entries.filter((e) => e.c >= 2);
+    if(repeated.length){ return repeated.sort((a, b) => b.v - a.v)[0].v; } // 2번 이상 나온 것 중 최대
+    if(entries.length){ return entries.sort((a, b) => b.v - a.v)[0].v; }   // 그래도 없으면 전체 최대
+    return 0;
   }
 
   // 줄 기반 폴백 (좌표 없을 때)
@@ -877,17 +887,26 @@
   }
 
   // 디버그(?debug=1): OCR 원문을 복사 가능한 형태로 보여줌 (파싱 튜닝용)
+  let lastOcrWords = null; // 디버그용 단어 좌표 보관
   function showOcrDebug(text, parsed, total){
     parsed = parsed || [];
     const byCat = { "맥주": [], "소주": [], "식사": [] };
     parsed.forEach((it) => {
       byCat[classifyReceiptName(it.name)].push(`${it.name}(${it.qty}개·${it.lineTotal})`);
     });
+    // 행 묶기 결과 덤프 (구겨진 영수증 진단용)
+    let rowsDump = "";
+    if(lastOcrWords && lastOcrWords.length){
+      const rows = groupRows(lastOcrWords);
+      rowsDump = "\n===== 행 묶기 결과 (y좌표별) =====\n" +
+        rows.map((r) => `y${Math.round(r.y)}| ` + r.ws.map((w) => w.t).join(" ")).join("\n") + "\n";
+    }
     const report =
-      `[파싱 결과] 인식된 줄 ${parsed.length}개 / 영수증총액 ${total || "?"}\n` +
+      `[파싱 결과] 인식된 품목 ${parsed.length}개 / 영수증총액 ${total || "?"}\n` +
       `▶ 식사 ${byCat["식사"].length}개: ${byCat["식사"].join(", ") || "-"}\n` +
       `▶ 맥주 ${byCat["맥주"].length}개: ${byCat["맥주"].join(", ") || "-"}\n` +
       `▶ 소주 ${byCat["소주"].length}개: ${byCat["소주"].join(", ") || "-"}\n` +
+      rowsDump +
       `\n===== OCR 원문 (이 전체를 복사해서 개발자에게 보내주세요) =====\n` +
       text;
 

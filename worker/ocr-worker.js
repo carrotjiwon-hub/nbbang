@@ -38,7 +38,7 @@ export default {
             requests: [
               {
                 image: { content: imageBase64 },
-                features: [{ type: "TEXT_DETECTION" }],
+                features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
                 imageContext: { languageHints: ["ko"] }
               }
             ]
