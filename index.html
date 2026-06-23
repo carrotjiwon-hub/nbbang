@@ -686,7 +686,7 @@
     }
   }
 
-  const RECEIPT_IGNORE = ["합계","총액","받을금액","받은금액","거스름","부가세","과세","면세","봉사료","카드","승인","현금","총구매","구매액","포인트","적립","할인","공급가","부가가치","결제","금액계","수량","단가","품목","total","sum","tel","사업자","대표자","주소"];
+  const RECEIPT_IGNORE = ["합계","압계","함계","총액","받을금액","받은금액","거스름","부가세","과세","면세","봉사료","카드","승인","현금","총구매","구매액","포인트","적립","할인","공급가","부가가치","결제","금액계","수량","단가","품목","메뉴","재발행","전표","매출","할부","일시불","신용","비씨","테이블","영수증","대표자","사업자","주소","total","sum","tel","pos","bill","vat"];
 
   // 단어 좌표(words)가 있으면 행/열 구조로 정확히 파싱, 없으면 줄 기반 폴백
   function parseReceiptText(text, words){
@@ -834,6 +834,23 @@
       else { mealTotal += it.lineTotal; }
     });
 
+    const classifiedSum = mealTotal + beer.amt + soju.amt;
+
+    // ── 신뢰 게이트: 분류합계가 영수증 총액과 일치할 때만 자동입력 (틀린 금액 방지) ──
+    const tolerance = Math.max(100, Math.round((receiptTotal || classifiedSum) * 0.02));
+    const verified = receiptTotal > 0 && Math.abs(classifiedSum - receiptTotal) <= tolerance;
+
+    if(!verified){
+      // 검증 실패(구겨짐/흐림 등) → 자동입력하지 않고 직접 입력 유도
+      round.ocrCheck = receiptTotal > 0
+        ? { classifiedSum, receiptTotal, ok: false, diff: classifiedSum - receiptTotal, notApplied: true }
+        : null;
+      return receiptTotal > 0
+        ? `영수증을 정확히 읽지 못했어요 (인식 ${won(classifiedSum)} ≠ 영수증 ${won(receiptTotal)}). 자동입력은 건너뛰고, 다음 화면에서 직접 입력해주세요.`
+        : "영수증을 또렷이 읽지 못했어요. 다음 화면에서 직접 입력해주세요.";
+    }
+
+    // 검증 통과 → 실제로 채움
     const allMemberIds = state.members.map((m) => m.id);
     function getOrCreate(name, mode, defPrice){
       let item = round.items.find((i) => i.name.trim() === name);
@@ -843,47 +860,27 @@
       }
       return item;
     }
-
     const parts = [];
     if(mealTotal > 0){
       const m = getOrCreate("식사", "flat", 0);
       m.price = mealTotal;
-      if(m.assignedTo.length === 0) m.assignedTo = [...allMemberIds]; // 식사는 기본 전체
+      if(m.assignedTo.length === 0) m.assignedTo = [...allMemberIds];
       parts.push(`식사 ${won(mealTotal)}`);
     }
     if(beer.amt > 0){
       const b = getOrCreate("맥주", "perPerson", 5000);
       if(beer.qty > 0) b.price = Math.round(beer.amt / beer.qty);
-      b.receiptQty = beer.qty;          // 영수증상 총 잔/병 수 (힌트)
-      b.receiptAmt = beer.amt;
+      b.receiptQty = beer.qty; b.receiptAmt = beer.amt;
       parts.push(`맥주 ${beer.qty}잔(병당 ${won(b.price)})`);
     }
     if(soju.amt > 0){
       const s = getOrCreate("소주", "perPerson", 4000);
       if(soju.qty > 0) s.price = Math.round(soju.amt / soju.qty);
-      s.receiptQty = soju.qty;
-      s.receiptAmt = soju.amt;
+      s.receiptQty = soju.qty; s.receiptAmt = soju.amt;
       parts.push(`소주 ${soju.qty}병(병당 ${won(s.price)})`);
     }
-
-    if(parts.length === 0){
-      return "금액을 인식하지 못했어요. 다음 화면에서 직접 입력해주세요.";
-    }
-
-    // ── 검증: 3분류 합계가 영수증 총액과 일치하는지 ──
-    const classifiedSum = mealTotal + beer.amt + soju.amt;
-    if(receiptTotal > 0){
-      const diff = classifiedSum - receiptTotal;
-      const tolerance = Math.max(100, Math.round(receiptTotal * 0.02)); // 2% 또는 100원 오차 허용
-      round.ocrCheck = {
-        classifiedSum,
-        receiptTotal,
-        ok: Math.abs(diff) <= tolerance,
-        diff
-      };
-    }
-
-    return `인식 완료! ${parts.join(" · ")} — 누가 몇 잔/병인지는 다음 화면에서 입력해주세요.`;
+    round.ocrCheck = { classifiedSum, receiptTotal, ok: true, diff: classifiedSum - receiptTotal };
+    return `✅ 인식 완료! ${parts.join(" · ")} — 영수증 총액과 일치해요. 누가 몇 잔/병인지는 다음 화면에서 입력해주세요.`;
   }
 
   // 디버그(?debug=1): OCR 원문을 복사 가능한 형태로 보여줌 (파싱 튜닝용)
@@ -987,15 +984,17 @@
     const check = getActiveRound().ocrCheck;
     if(check){
       const banner = document.createElement("div");
+      banner.className = "mb-3 px-4 py-3 rounded-[12px] text-[13px] font-semibold";
       if(check.ok){
-        banner.className = "mb-3 px-4 py-3 rounded-[12px] text-[13px] font-semibold";
         banner.style.cssText = "background:#e7f9f0;color:#00875a";
-        banner.textContent = `✅ 영수증 총액(${won(check.receiptTotal)})과 분류 합계가 일치해요`;
-      } else {
-        const more = check.diff > 0 ? "분류가 더 많음" : "분류가 더 적음";
-        banner.className = "mb-3 px-4 py-3 rounded-[12px] text-[13px] font-semibold";
+        banner.textContent = `✅ 영수증 총액(${won(check.receiptTotal)})과 일치하게 자동입력했어요`;
+      } else if(check.notApplied){
+        // 검증 실패로 자동입력을 건너뛴 경우
         banner.style.cssText = "background:#fff4e5;color:#c2410c";
-        banner.innerHTML = `⚠️ 분류 합계 <b>${won(check.classifiedSum)}</b> ≠ 영수증 총액 <b>${won(check.receiptTotal)}</b> (${more}, 차이 ${won(Math.abs(check.diff))})<br>금액이 누락·중복됐을 수 있어요. 아래 항목을 확인해주세요.`;
+        banner.innerHTML = `⚠️ 영수증을 정확히 읽지 못해 <b>자동입력을 건너뛰었어요</b>.<br>아래에 금액을 직접 입력해주세요. (영수증 추정 총액 ${won(check.receiptTotal)})`;
+      } else {
+        banner.style.cssText = "background:#fff4e5;color:#c2410c";
+        banner.innerHTML = `⚠️ 분류 합계 <b>${won(check.classifiedSum)}</b> ≠ 영수증 총액 <b>${won(check.receiptTotal)}</b><br>금액을 확인해주세요.`;
       }
       itemListEl.appendChild(banner);
     }
@@ -1380,11 +1379,15 @@
       installPrimary.classList.remove("hidden");
     } else if(isIOS){
       // iOS 사파리: 공유버튼 가리키는 화살표 + 단계
-      installSteps.innerHTML = stepHtml([
-        "화면 <b>하단 가운데 '공유' 버튼</b>(⬆️ 네모 아이콘)을 눌러요",
-        "메뉴를 내려서 <b>'홈 화면에 추가'</b>를 눌러요",
-        "오른쪽 위 <b>'추가'</b>를 누르면 끝!"
-      ]);
+      installSteps.innerHTML =
+        `<div style="background:#fff4e5;color:#c2410c;font-size:12px;font-weight:700;padding:8px 10px;border-radius:8px;margin-bottom:8px">⚠️ 하단에 '공유' 버튼이 안 보이면 카톡·인스타 등 <b>인앱 브라우저</b>예요.<br>그럴 땐 우측 위 메뉴로 <b>'Safari로 열기'</b> 후 진행하세요.</div>` +
+        stepHtml([
+          "<b>사파리</b> 화면 <b>하단 가운데 '공유' 버튼</b>(⬆️ 네모 아이콘)을 눌러요",
+          "메뉴를 내려서 <b>'홈 화면에 추가'</b>를 눌러요",
+          "오른쪽 위 <b>'추가'</b>를 누르면 끝!"
+        ]);
+      installCopyUrl.classList.remove("hidden");
+      installCopyUrl.dataset.url = cleanUrl;
       installArrow.classList.remove("hidden"); // 하단 공유버튼 방향 화살표
     } else if(isAndroid){
       installSteps.innerHTML = stepHtml([
