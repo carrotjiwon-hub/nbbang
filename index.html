@@ -1053,6 +1053,11 @@
     getActiveRound().items.forEach((item) => {
       const lineTotal = itemLineTotal(item);
       const isPerPerson = item.mode === "perPerson";
+      // 항목명 기반 단위 라벨: 맥주=1잔(병), 소주=1병
+      const isSoju = isPerPerson && item.name.includes("소주");
+      const isBeer = isPerPerson && item.name.includes("맥주");
+      const unitLabel = isSoju ? "1병 단가" : (isBeer ? "1잔(병) 단가" : "1잔 단가");
+      const countUnit = isSoju ? "병" : "잔";
       const card = document.createElement("div");
       card.className = "toss-card p-4";
       card.innerHTML = `
@@ -1063,7 +1068,7 @@
         </div>
 
         <div class="flex items-center gap-1.5 mb-3">
-          <span class="text-xs text-[var(--toss-gray-500)] font-medium whitespace-nowrap">${isPerPerson ? "1잔 단가" : "금액"}</span>
+          <span class="text-xs text-[var(--toss-gray-500)] font-medium whitespace-nowrap">${isPerPerson ? unitLabel : "금액"}</span>
           <input data-id="${item.id}" type="text" inputmode="numeric" value="${item.price.toLocaleString("ko-KR")}"
             class="item-price-input flex-1 px-3 py-2 rounded-[10px] bg-[var(--toss-gray-100)] text-[14px] font-semibold text-right outline-none" />
           <span class="text-[13px] text-[var(--toss-gray-500)] font-semibold">원</span>
@@ -1071,7 +1076,7 @@
 
         ${isPerPerson && item.receiptQty ? `
           <div class="mb-3 px-3 py-2 rounded-[10px] text-[12px] font-semibold" style="background:#e8f3ff;color:var(--toss-blue)">
-            🧾 영수증 인식: 총 ${item.receiptQty}잔/병 (${won(item.receiptAmt || 0)}) · 아래에서 각자 마신 만큼 입력하세요
+            🧾 영수증 인식: 총 ${item.receiptQty}${countUnit} (${won(item.receiptAmt || 0)}) · 아래에서 각자 마신 만큼 입력하세요
           </div>
         ` : ""}
 
@@ -1084,7 +1089,7 @@
                   <button data-item="${item.id}" data-member="${m.id}" class="qtyMinusBtn btn-secondary w-7 h-7 text-[14px] font-bold flex items-center justify-center">−</button>
                   <span class="text-[14px] font-bold w-6 text-center member-qty-value" data-item="${item.id}" data-member="${m.id}">${(item.memberQty && item.memberQty[m.id]) || 0}</span>
                   <button data-item="${item.id}" data-member="${m.id}" class="qtyPlusBtn btn-secondary w-7 h-7 text-[14px] font-bold flex items-center justify-center">+</button>
-                  <span class="text-xs text-[var(--toss-gray-500)] w-4">잔</span>
+                  <span class="text-xs text-[var(--toss-gray-500)] w-4">${countUnit}</span>
                 </div>
               </div>
             `).join("")}
