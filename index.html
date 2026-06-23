@@ -568,6 +568,14 @@
   const OCR_ENDPOINT = "https://nbbang-ocr.carrot-jiwon.workers.dev";
   let lastOcrText = "";
 
+  // 디버그 모드: ?debug=1 또는 #debug 로 한 번 들어오면 기억(localStorage). ?debug=0 으로 끄기
+  function isDebugMode(){
+    const q = (location.search + location.hash).toLowerCase();
+    if(/debug=?0\b/.test(q)){ try{ localStorage.removeItem("nbbang_debug"); }catch(e){} return false; }
+    if(q.includes("debug")){ try{ localStorage.setItem("nbbang_debug", "1"); }catch(e){} return true; }
+    try{ return localStorage.getItem("nbbang_debug") === "1"; }catch(e){ return false; }
+  }
+
   const receiptDropZone = $("#receiptDropZone");
   const receiptInput = $("#receiptInput");
   const receiptPreview = $("#receiptPreview");
@@ -575,8 +583,8 @@
   const ocrStatusText = $("#ocrStatusText");
 
   receiptDropZone.addEventListener("click", () => {
-    // 영수증 자동인식은 정확도 개선 전까지 비활성화 (개발/테스트는 ?debug=1 에서만)
-    if(!OCR_ENDPOINT || !location.search.includes("debug")){
+    // 영수증 자동인식은 정확도 개선 전까지 비활성화 (개발/테스트는 디버그 모드에서만)
+    if(!OCR_ENDPOINT || !isDebugMode()){
       alert("영수증 자동인식은 준비 중이에요. 아래 '직접 입력하기'로 진행해주세요!");
       return;
     }
@@ -617,7 +625,7 @@
       const summary = applyReceiptToRound(parsed, total);
       ocrStatusText.textContent = summary;
       save();
-      if(location.search.includes("debug")){
+      if(isDebugMode()){
         // 디버그 모드: 분류 내역 + 원문을 화면에 남겨 복사할 수 있게 자동 이동 안 함
         showOcrDebug(lastOcrText, parsed, total);
         btnNext.disabled = false;
@@ -626,7 +634,7 @@
         setTimeout(() => { ocrProgressBox.classList.add("hidden"); goToStep(3); }, 1000);
       }
     } catch(err){
-      if(location.search.includes("debug")){
+      if(isDebugMode()){
         // 디버그 모드: 실패해도 에러/원문을 화면에 남김
         ocrStatusText.textContent = "인식 실패: " + (err && err.message ? err.message : err);
         showOcrDebug(lastOcrText || "(서버 응답 없음 — " + (err && err.message ? err.message : err) + ")", [], 0);
@@ -1280,6 +1288,23 @@
   renderRecentMembers();
   if(state.rounds.length){ ensureRounds(); renderRoundTabs(); renderItems(); }
   renderStepUI();
+
+  // 디버그 모드면 화면에 표시 + 카메라 카드 활성화 안내
+  if(isDebugMode()){
+    const bar = document.createElement("div");
+    bar.textContent = "🐛 디버그 모드 ON — 카메라(OCR) 테스트 가능";
+    bar.style.cssText = "position:sticky;top:0;z-index:50;background:#191f28;color:#fff;font-size:12px;font-weight:700;text-align:center;padding:6px";
+    document.body.prepend(bar);
+    const dz = $("#receiptDropZone");
+    if(dz){
+      dz.classList.remove("opacity-60");
+      dz.classList.add("cursor-pointer","active:bg-[var(--toss-gray-100)]");
+      const badge = dz.querySelector("span");
+      if(badge){ badge.textContent = "테스트"; badge.style.background = "var(--toss-blue)"; badge.style.color = "#fff"; badge.style.borderColor = "var(--toss-blue)"; }
+      const desc = dz.querySelector("div:last-child");
+      if(desc) desc.textContent = "영수증을 찍으면 인식 결과를 보여줘요";
+    }
+  }
 
 })();
 </script>
