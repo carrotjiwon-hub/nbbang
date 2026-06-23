@@ -780,8 +780,8 @@
     return 0;
   }
 
-  // 키워드 앵커 방식: 맥주/소주 브랜드 글자 위치에서 같은 줄(±30px) 오른쪽의 금액을 찾음.
-  // 행 묶기가 깨진(이름·금액 분리) 영수증에서도 술 금액을 잡아냄. 같은 금액 중복집계 방지.
+  // 키워드 앵커 방식: 맥주/소주 브랜드 글자와 같은 높이 띠(±35px)에서 금액을 찾음.
+  // 오른쪽 우선, 없으면 띠 전체. 회전/분리돼 읽혀도 동작. 같은 금액 중복집계 방지.
   function detectAlcoholByAnchor(words){
     const isNum = (t) => /^\d[\d,\.]*$/.test(t);
     const toNum = (t) => parseInt(t.replace(/[,\.]/g, ""), 10);
@@ -792,11 +792,13 @@
       words.forEach((w) => {
         const s = (w.t || "").toLowerCase().replace(/\s/g, "");
         if(!keywords.some((k) => s.includes(k.toLowerCase()))) return;
-        const sameRow = numWords.filter((n) => !claimed.has(n) && Math.abs(n.y - w.y) <= 30 && n.x > w.x).sort((a, b) => a.x - b.x);
-        if(sameRow.length === 0) return;
-        const amount = Math.max(...sameRow.map((n) => n.v));      // 금액 = 같은 줄 오른쪽 최대값
-        const amountWord = sameRow.find((n) => n.v === amount);
-        const q = sameRow.find((n) => n.v >= 1 && n.v <= 99 && n !== amountWord);
+        const band = numWords.filter((n) => !claimed.has(n) && Math.abs(n.y - w.y) <= 35);
+        const right = band.filter((n) => n.x > w.x);
+        const pool = right.length ? right : band;   // 오른쪽 우선, 없으면 같은 높이 띠 전체
+        if(pool.length === 0) return;
+        const amount = Math.max(...pool.map((n) => n.v));   // 금액 = 띠 내 최대값
+        const amountWord = pool.find((n) => n.v === amount);
+        const q = pool.find((n) => n.v >= 1 && n.v <= 99 && n !== amountWord);
         claimed.add(amountWord);
         amt += amount; qty += (q ? q.v : 1);
       });
