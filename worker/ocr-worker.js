@@ -67,7 +67,8 @@ export default {
         return {
           t: a.description,
           x: Math.round((Math.min(...xs) + Math.max(...xs)) / 2),
-          y: Math.round((Math.min(...ys) + Math.max(...ys)) / 2)
+          y: Math.round((Math.min(...ys) + Math.max(...ys)) / 2),
+          h: Math.round(Math.max(...ys) - Math.min(...ys))  // 글자 높이 (해상도 비례 행묶기용)
         };
       });
 

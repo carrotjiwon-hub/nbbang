@@ -711,12 +711,20 @@
     return parseReceiptLines(text);
   }
 
+  // 글자 높이의 중앙값 → 해상도에 비례한 '같은 줄' 허용치 계산 (고해상도 사진 대응)
+  function rowTolerance(words){
+    const hs = words.map((w) => w.h || 0).filter((h) => h > 0).sort((a, b) => a - b);
+    const medianH = hs.length ? hs[Math.floor(hs.length / 2)] : 24;
+    return Math.max(12, Math.round(medianH * 0.8)); // 글자높이의 80%, 최소 12px
+  }
+
   // 좌표 기반(기울어진 사진/4칸 영수증 대응): y로 행 묶고, 행 전체 텍스트에서 숫자 추출
   function groupRows(words){
+    const tol = rowTolerance(words);
     const ws = words.map((w) => ({ t: w.t, x: w.x, y: w.y })).sort((a, b) => a.y - b.y);
     const rows = [];
     ws.forEach((w) => {
-      let row = rows.find((r) => Math.abs(r.y - w.y) <= 18); // 기울임 여유 18px
+      let row = rows.find((r) => Math.abs(r.y - w.y) <= tol);
       if(!row){ row = { y: w.y, ws: [] }; rows.push(row); }
       row.ws.push(w);
       row.y = (row.y * (row.ws.length - 1) + w.y) / row.ws.length;
@@ -785,22 +793,32 @@
   function detectAlcoholByAnchor(words){
     const isNum = (t) => /^\d[\d,\.]*$/.test(t);
     const toNum = (t) => parseInt(t.replace(/[,\.]/g, ""), 10);
-    const numWords = words.filter((w) => isNum(w.t)).map((w) => ({ x: w.x, y: w.y, v: toNum(w.t) })).filter((w) => w.v >= 100 && w.v <= 5000000);
+    const tol = Math.round(rowTolerance(words) * 1.2); // 앵커는 행묶기보다 살짝 여유
+    const numWords = words.filter((w) => isNum(w.t)).map((w) => ({ x: w.x, y: w.y, v: toNum(w.t), raw: w.t.replace(/[,\.]/g, "") })).filter((w) => w.v >= 100 && w.v <= 5000000);
     const claimed = new Set();
     function detect(keywords){
       let amt = 0, qty = 0;
       words.forEach((w) => {
         const s = (w.t || "").toLowerCase().replace(/\s/g, "");
         if(!keywords.some((k) => s.includes(k.toLowerCase()))) return;
-        const band = numWords.filter((n) => !claimed.has(n) && Math.abs(n.y - w.y) <= 35);
+        const band = numWords.filter((n) => !claimed.has(n) && Math.abs(n.y - w.y) <= tol);
         const right = band.filter((n) => n.x > w.x);
         const pool = right.length ? right : band;   // 오른쪽 우선, 없으면 같은 높이 띠 전체
         if(pool.length === 0) return;
-        const amount = Math.max(...pool.map((n) => n.v));   // 금액 = 띠 내 최대값
-        const amountWord = pool.find((n) => n.v === amount);
-        const q = pool.find((n) => n.v >= 1 && n.v <= 99 && n !== amountWord);
-        claimed.add(amountWord);
-        amt += amount; qty += (q ? q.v : 1);
+        const amW = pool.reduce((a, b) => (b.x > a.x ? b : a)); // 금액 = 가장 오른쪽
+        let amount = amW.v, q = 1;
+        // 디글루: 금액 앞자리를 떼서 같은 줄 단가와 일치하면 '수량+금액 붙음'으로 판단 (예 15,000→1+5,000)
+        const others = pool.filter((n) => n !== amW).map((n) => n.v);
+        for(let k = 1; k <= 2; k++){
+          if(amW.raw.length - k < 1) break;
+          const strip = parseInt(amW.raw.slice(k), 10);
+          const lead = parseInt(amW.raw.slice(0, k), 10);
+          if(others.includes(strip) && lead >= 1 && lead <= 20){ amount = strip; q = lead; break; }
+        }
+        // 디글루 안 됐으면 같은 줄 작은 수(수량)로 q 추정
+        if(q === 1){ const qc = others.find((v) => v >= 1 && v <= 99 && v !== amount); if(qc) q = qc; }
+        claimed.add(amW);
+        amt += amount; qty += q;
       });
       return { amt, qty };
     }
