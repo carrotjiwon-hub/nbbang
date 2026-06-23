@@ -2,4 +2,7 @@ worker/.wrangler/
 worker/node_modules/
 node_modules/
 test-*.mjs
-test-receipt.png
+test-receipt*.png
+
+uploaded-*
+extract-img.mjs

@@ -708,7 +708,8 @@
     return rows;
   }
   const rowTextOf = (r) => r.ws.map((w) => w.t).join(" ");
-  const extractNums = (s) => (s.match(/\d[\d,]*/g) || []).map((x) => parseInt(x.replace(/,/g, ""), 10)).filter((n) => !isNaN(n));
+  // 콤마(,)와 점(.) 둘 다 천단위 구분자로 처리 (OCR이 5,000을 5.000으로 읽는 경우 대응)
+  const extractNums = (s) => (s.match(/\d[\d,\.]*/g) || []).map((x) => parseInt(x.replace(/[,\.]/g, ""), 10)).filter((n) => !isNaN(n));
 
   function parseReceiptWords(words){
     const rows = groupRows(words);
