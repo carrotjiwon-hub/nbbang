@@ -1269,15 +1269,38 @@
     e.preventDefault();
     deferredInstallPrompt = e;
   });
+
+  // 카카오톡 등 '인앱 브라우저'는 홈 화면 추가가 불가 → 진짜 브라우저로 열어야 함
+  function isInAppBrowser(){
+    return /KAKAOTALK|Instagram|Line\/|NAVER|FBAN|FBAV|DaumApps|everytime|band|zumApp/i.test(navigator.userAgent || "");
+  }
+  function isStandalone(){
+    return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+  }
+
   $("#btnAddHome").addEventListener("click", () => {
+    if(isStandalone()){
+      alert("이미 홈 화면 앱으로 실행 중이에요! 🎉");
+      return;
+    }
+    if(isInAppBrowser()){
+      const ok = confirm("지금은 다른 앱(카톡 등) 안의 브라우저라 홈 화면 추가가 안 돼요.\n\n주소를 복사해서 사파리/크롬에 붙여넣어 열면 추가할 수 있어요. 주소를 복사할까요?");
+      if(ok){
+        const url = location.href.split("?")[0];
+        navigator.clipboard?.writeText(url)
+          .then(() => alert("주소가 복사됐어요!\n사파리/크롬 주소창에 붙여넣어 열어주세요."))
+          .catch(() => alert("주소: " + url));
+      }
+      return;
+    }
     if(deferredInstallPrompt){
       deferredInstallPrompt.prompt();
-    } else {
-      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-      alert(isIOS
-        ? "iOS Safari는 자동 설치를 지원하지 않아요. 하단 공유 버튼 → '홈 화면에 추가'를 눌러주세요."
-        : "이 브라우저에서는 자동 설치 메뉴를 지원하지 않아요. 브라우저 메뉴에서 '홈 화면에 추가' 또는 '앱 설치'를 선택해주세요.");
+      return;
     }
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    alert(isIOS
+      ? "홈 화면에 추가하기 (사파리):\n\n1) 화면 하단 가운데 '공유' 버튼(⬆️네모) 탭\n2) 메뉴에서 '홈 화면에 추가' 탭\n3) 오른쪽 위 '추가' 탭"
+      : "브라우저 메뉴(⋮)에서 '홈 화면에 추가' 또는 '앱 설치'를 선택해주세요.");
   });
 
   // ---------- 초기화 ----------
