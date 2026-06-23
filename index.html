@@ -671,7 +671,15 @@
       ensureRounds();
       const parsed = parseReceiptText(text || "", words);
       const total = (words && words.length) ? extractTotalFromWords(words) : extractReceiptTotal(text || "");
-      const summary = applyReceiptToRound(parsed, total);
+      // 술 금액: 키워드 앵커 방식(견고) — 좌표 없으면 줄 파싱 결과로 폴백
+      let alcohol;
+      if(words && words.length){
+        alcohol = detectAlcoholByAnchor(words);
+      } else {
+        alcohol = { beer: { amt: 0, qty: 0 }, soju: { amt: 0, qty: 0 } };
+        parsed.forEach((it) => { const c = classifyReceiptName(it.name); if(c === "맥주"){ alcohol.beer.amt += it.lineTotal; alcohol.beer.qty += it.qty; } else if(c === "소주"){ alcohol.soju.amt += it.lineTotal; alcohol.soju.qty += it.qty; } });
+      }
+      const summary = applyReceiptToRound(alcohol, total);
       ocrStatusText.textContent = summary;
       save();
       if(isDebugMode()){
@@ -772,6 +780,31 @@
     return 0;
   }
 
+  // 키워드 앵커 방식: 맥주/소주 브랜드 글자 위치에서 같은 줄(±30px) 오른쪽의 금액을 찾음.
+  // 행 묶기가 깨진(이름·금액 분리) 영수증에서도 술 금액을 잡아냄. 같은 금액 중복집계 방지.
+  function detectAlcoholByAnchor(words){
+    const isNum = (t) => /^\d[\d,\.]*$/.test(t);
+    const toNum = (t) => parseInt(t.replace(/[,\.]/g, ""), 10);
+    const numWords = words.filter((w) => isNum(w.t)).map((w) => ({ x: w.x, y: w.y, v: toNum(w.t) })).filter((w) => w.v >= 100 && w.v <= 5000000);
+    const claimed = new Set();
+    function detect(keywords){
+      let amt = 0, qty = 0;
+      words.forEach((w) => {
+        const s = (w.t || "").toLowerCase().replace(/\s/g, "");
+        if(!keywords.some((k) => s.includes(k.toLowerCase()))) return;
+        const sameRow = numWords.filter((n) => !claimed.has(n) && Math.abs(n.y - w.y) <= 30 && n.x > w.x).sort((a, b) => a.x - b.x);
+        if(sameRow.length === 0) return;
+        const amount = Math.max(...sameRow.map((n) => n.v));      // 금액 = 같은 줄 오른쪽 최대값
+        const amountWord = sameRow.find((n) => n.v === amount);
+        const q = sameRow.find((n) => n.v >= 1 && n.v <= 99 && n !== amountWord);
+        claimed.add(amountWord);
+        amt += amount; qty += (q ? q.v : 1);
+      });
+      return { amt, qty };
+    }
+    return { beer: detect(BEER_KEYWORDS), soju: detect(SOJU_KEYWORDS) };
+  }
+
   // 줄 기반 폴백 (좌표 없을 때)
   function parseReceiptLines(text){
     const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -827,7 +860,8 @@
   }
 
   // 핵심: 맥주·소주만 정확히 찾고, 식사 = 영수증 총액 − 맥주 − 소주 (나머지는 전부 식사)
-  function applyReceiptToRound(parsedItems, receiptTotal){
+  // alcohol = { beer:{amt,qty}, soju:{amt,qty} } (키워드 앵커 방식 결과)
+  function applyReceiptToRound(alcohol, receiptTotal){
     const round = getActiveRound();
     round.ocrCheck = null;
     round.receiptTotalRef = null;
@@ -838,14 +872,8 @@
     }
     round.receiptTotalRef = receiptTotal; // 총액은 참고용으로 항상 보관
 
-    // 맥주/소주만 합산 (식사는 합산하지 않음)
-    const beer = { qty: 0, amt: 0 };
-    const soju = { qty: 0, amt: 0 };
-    (parsedItems || []).forEach((it) => {
-      const cat = classifyReceiptName(it.name);
-      if(cat === "맥주"){ beer.qty += it.qty; beer.amt += it.lineTotal; }
-      else if(cat === "소주"){ soju.qty += it.qty; soju.amt += it.lineTotal; }
-    });
+    const beer = { qty: (alcohol && alcohol.beer.qty) || 0, amt: (alcohol && alcohol.beer.amt) || 0 };
+    const soju = { qty: (alcohol && alcohol.soju.qty) || 0, amt: (alcohol && alcohol.soju.amt) || 0 };
 
     // 술 브랜드가 영수증에 '있는데' 금액을 못 읽은 경우 → 식사에 전부 넣지 않음
     const kw = alcoholKeywordsInText(lastOcrText);
