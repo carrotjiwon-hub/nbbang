@@ -312,6 +312,15 @@
     return "식사";
   }
 
+  // OCR 원문 전체에서 맥주/소주 브랜드가 '언급'됐는지 (금액 매칭 실패해도 존재는 감지)
+  function alcoholKeywordsInText(text){
+    const s = (text || "").toLowerCase().replace(/\s/g, "");
+    return {
+      beer: BEER_KEYWORDS.some((k) => s.includes(k.toLowerCase())),
+      soju: SOJU_KEYWORDS.some((k) => s.includes(k.toLowerCase()))
+    };
+  }
+
   function makeDefaultItems(){
     const allMemberIds = state.members.map((m) => m.id);
     return DEFAULT_ITEMS_SPEC.map((spec) => ({
@@ -821,11 +830,13 @@
   function applyReceiptToRound(parsedItems, receiptTotal){
     const round = getActiveRound();
     round.ocrCheck = null;
+    round.receiptTotalRef = null;
 
     // 총액을 못 읽으면 자동입력 불가 (뺄셈의 기준이 없음)
     if(!receiptTotal || receiptTotal <= 0){
       return "영수증 총액을 읽지 못했어요. 다음 화면에서 직접 입력해주세요.";
     }
+    round.receiptTotalRef = receiptTotal; // 총액은 참고용으로 항상 보관
 
     // 맥주/소주만 합산 (식사는 합산하지 않음)
     const beer = { qty: 0, amt: 0 };
@@ -836,14 +847,23 @@
       else if(cat === "소주"){ soju.qty += it.qty; soju.amt += it.lineTotal; }
     });
 
-    // 술 금액이 총액을 넘으면 인식 오류 → 자동입력 안 함
-    if(beer.amt + soju.amt > receiptTotal){
-      round.ocrCheck = { receiptTotal, classifiedSum: beer.amt + soju.amt, ok: false, notApplied: true };
-      return "술 금액이 영수증 총액보다 크게 인식됐어요(오류). 다음 화면에서 직접 입력해주세요.";
+    // 술 브랜드가 영수증에 '있는데' 금액을 못 읽은 경우 → 식사에 전부 넣지 않음
+    const kw = alcoholKeywordsInText(lastOcrText);
+    const beerUnread = kw.beer && beer.amt === 0;
+    const sojuUnread = kw.soju && soju.amt === 0;
+
+    // 술 금액이 총액을 넘으면 인식 오류
+    const tooBig = beer.amt + soju.amt > receiptTotal;
+
+    if(beerUnread || sojuUnread || tooBig){
+      // 자동 분류 실패 → 총액만 참고로 보여주고 직접 나눠 입력하게
+      round.ocrCheck = { receiptTotal, ok: false, manualSplit: true };
+      const found = [kw.beer ? "맥주" : "", kw.soju ? "소주" : ""].filter(Boolean).join("·");
+      return `🧾 영수증 총액 ${won(receiptTotal)} 인식! ${found ? found + "가 영수증에 있지만 금액 매칭에 실패했어요. " : ""}다음 화면에서 식사·맥주·소주로 직접 나눠 입력해주세요 (합이 ${won(receiptTotal)}이 되게).`;
     }
 
-    const mealTotal = receiptTotal - beer.amt - soju.amt; // ★ 나머지는 다 식사
-
+    // 정상: 식사 = 총액 − 술
+    const mealTotal = receiptTotal - beer.amt - soju.amt;
     const allMemberIds = state.members.map((m) => m.id);
     function getOrCreate(name, mode, defPrice){
       let item = round.items.find((i) => i.name.trim() === name);
@@ -975,22 +995,27 @@
 
   function renderItems(){
     itemListEl.innerHTML = "";
+    const round0 = getActiveRound();
 
-    // 영수증 검증 배너: 3분류 합계 vs 영수증 총액
-    const check = getActiveRound().ocrCheck;
-    if(check){
+    // 영수증 총액 참고 배너 (영수증 인식했을 때) — 현재 입력합계와 실시간 비교
+    if(round0.receiptTotalRef){
+      const banner = document.createElement("div");
+      banner.id = "receiptRefBanner";
+      banner.className = "mb-3 px-4 py-3 rounded-[12px] text-[13px] font-bold";
+      itemListEl.appendChild(banner);
+      refreshReceiptRefBanner();
+    }
+
+    // 영수증 검증 배너 (자동입력 결과)
+    const check = round0.ocrCheck;
+    if(check && !check.ok){
       const banner = document.createElement("div");
       banner.className = "mb-3 px-4 py-3 rounded-[12px] text-[13px] font-semibold";
-      if(check.ok){
-        banner.style.cssText = "background:#e7f9f0;color:#00875a";
-        banner.textContent = `✅ 영수증 총액(${won(check.receiptTotal)})과 일치하게 자동입력했어요`;
-      } else if(check.notApplied){
-        // 검증 실패로 자동입력을 건너뛴 경우
-        banner.style.cssText = "background:#fff4e5;color:#c2410c";
-        banner.innerHTML = `⚠️ 영수증을 정확히 읽지 못해 <b>자동입력을 건너뛰었어요</b>.<br>아래에 금액을 직접 입력해주세요. (영수증 추정 총액 ${won(check.receiptTotal)})`;
+      banner.style.cssText = "background:#fff4e5;color:#c2410c";
+      if(check.manualSplit){
+        banner.innerHTML = `⚠️ 맥주·소주 금액을 자동으로 못 나눴어요. 위 총액 기준으로 직접 입력해주세요.`;
       } else {
-        banner.style.cssText = "background:#fff4e5;color:#c2410c";
-        banner.innerHTML = `⚠️ 분류 합계 <b>${won(check.classifiedSum)}</b> ≠ 영수증 총액 <b>${won(check.receiptTotal)}</b><br>금액을 확인해주세요.`;
+        banner.innerHTML = `⚠️ 자동입력을 건너뛰었어요. 직접 입력해주세요.`;
       }
       itemListEl.appendChild(banner);
     }
@@ -1141,6 +1166,24 @@
     $("#itemsTotal").textContent = won(roundTotal);
     const grandTotal = getAllItems().reduce((sum, i) => sum + itemLineTotal(i), 0);
     $("#allRoundsTotal").textContent = won(grandTotal);
+    refreshReceiptRefBanner();
+  }
+
+  // 영수증 총액 참고 배너를 현재 입력합계로 실시간 갱신
+  function refreshReceiptRefBanner(){
+    const banner = document.getElementById("receiptRefBanner");
+    if(!banner) return;
+    const round = getActiveRound();
+    const ref = round.receiptTotalRef || 0;
+    const cur = round.items.reduce((sum, i) => sum + itemLineTotal(i), 0);
+    const diff = ref - cur;
+    if(Math.abs(diff) <= Math.max(100, ref * 0.02)){
+      banner.style.cssText = "background:#e7f9f0;color:#00875a";
+      banner.innerHTML = `🧾 영수증 총액 <b>${won(ref)}</b> · 입력 합계 <b>${won(cur)}</b> ✅ 일치`;
+    } else {
+      banner.style.cssText = "background:#eef4ff;color:#1b64da";
+      banner.innerHTML = `🧾 영수증 총액 <b>${won(ref)}</b> · 입력 합계 <b>${won(cur)}</b><br>${diff > 0 ? `아직 <b>${won(diff)}</b> 남음 (식사·맥주·소주로 나눠 입력)` : `<b>${won(-diff)}</b> 초과됨`}`;
+    }
   }
 
   $("#btnAddItem").addEventListener("click", () => {
