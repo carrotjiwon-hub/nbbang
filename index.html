@@ -105,6 +105,29 @@
     display:flex;align-items:center;justify-content:center;
     font-weight:700; font-size:13px; color:#fff; flex-shrink:0;
   }
+  /* 홈 화면 추가 가이드 */
+  #installBackdrop{ position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:90; }
+  #installSheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:91;
+    max-width:480px; margin:0 auto;
+    background:#fff; border-radius:20px 20px 0 0;
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom));
+    box-shadow:0 -4px 24px rgba(0,0,0,0.15);
+    animation:sheetUp .25s ease;
+  }
+  @keyframes sheetUp{ from{ transform:translateY(100%);} to{ transform:translateY(0);} }
+  .install-step{ display:flex; align-items:flex-start; gap:12px; padding:10px 0; }
+  .install-step-num{
+    width:24px;height:24px;border-radius:50%;background:var(--toss-blue);color:#fff;
+    font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;
+  }
+  .install-step b{ color:var(--toss-blue); }
+  #installArrow{
+    position:fixed; bottom:46px; left:50%; transform:translateX(-50%); z-index:92;
+    font-size:40px; animation:arrowBounce 1s infinite;
+    filter:drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+  }
+  @keyframes arrowBounce{ 0%,100%{ transform:translate(-50%,0);} 50%{ transform:translate(-50%,10px);} }
 </style>
 </head>
 <body>
@@ -223,6 +246,22 @@
     <button id="btnNext" class="btn-primary w-full py-4 text-[16px]">다음</button>
   </div>
 
+</div>
+
+<!-- 홈 화면 추가 가이드 (바텀시트) -->
+<div id="installGuide" class="hidden">
+  <div id="installBackdrop"></div>
+  <div id="installSheet">
+    <div class="flex items-center justify-between mb-1">
+      <div class="text-[18px] font-extrabold">홈 화면에 추가하기</div>
+      <button id="installClose" class="text-[var(--toss-gray-500)] text-lg font-bold px-2">✕</button>
+    </div>
+    <p class="text-[13px] text-[var(--toss-gray-500)] mb-4">한 번 추가하면 앱처럼 빠르게 열 수 있어요</p>
+    <div id="installSteps"></div>
+    <button id="installCopyUrl" class="hidden btn-secondary w-full py-3 text-[14px] mt-2">🔗 주소 복사하기</button>
+    <button id="installPrimary" class="hidden btn-primary w-full py-4 text-[16px] mt-2">홈 화면에 추가</button>
+  </div>
+  <div id="installArrow" class="hidden">⬇️</div>
 </div>
 
 <script>
@@ -1278,30 +1317,84 @@
     return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
   }
 
-  $("#btnAddHome").addEventListener("click", () => {
+  const installGuide = $("#installGuide");
+  const installSteps = $("#installSteps");
+  const installArrow = $("#installArrow");
+  const installCopyUrl = $("#installCopyUrl");
+  const installPrimary = $("#installPrimary");
+
+  function closeInstallGuide(){
+    installGuide.classList.add("hidden");
+    installArrow.classList.add("hidden");
+  }
+  $("#installClose").addEventListener("click", closeInstallGuide);
+  $("#installBackdrop").addEventListener("click", closeInstallGuide);
+
+  function stepHtml(steps){
+    return steps.map((s, i) => `<div class="install-step"><div class="install-step-num">${i + 1}</div><div class="text-[14px] leading-[1.5]">${s}</div></div>`).join("");
+  }
+
+  function openInstallGuide(){
+    const ua = navigator.userAgent || "";
+    const isIOS = /iphone|ipad|ipod/i.test(ua);
+    const isAndroid = /android/i.test(ua);
+    const cleanUrl = location.href.split("?")[0];
+
+    installArrow.classList.add("hidden");
+    installCopyUrl.classList.add("hidden");
+    installPrimary.classList.add("hidden");
+
     if(isStandalone()){
-      alert("이미 홈 화면 앱으로 실행 중이에요! 🎉");
-      return;
+      installSteps.innerHTML = `<p class="text-[14px] py-2">이미 홈 화면 앱으로 실행 중이에요! 🎉</p>`;
+    } else if(isInAppBrowser()){
+      // 카톡 등 인앱 브라우저 → 진짜 브라우저로 열어야 함
+      installSteps.innerHTML = stepHtml([
+        "지금은 <b>카톡(앱) 안의 브라우저</b>라 홈 화면 추가가 안 돼요.",
+        "오른쪽 위 <b>⋮(또는 ···)</b> → <b>'다른 브라우저로 열기'</b> 또는 <b>'Safari로 열기'</b>",
+        "열린 사파리/크롬에서 다시 <b>홈추가</b>를 눌러주세요"
+      ]);
+      installCopyUrl.classList.remove("hidden");
+      installCopyUrl.dataset.url = cleanUrl;
+    } else if(deferredInstallPrompt){
+      // 안드로이드 크롬: 원탭 설치 가능
+      installSteps.innerHTML = `<p class="text-[14px] py-2">아래 버튼을 누르면 홈 화면에 바로 추가돼요 👇</p>`;
+      installPrimary.classList.remove("hidden");
+    } else if(isIOS){
+      // iOS 사파리: 공유버튼 가리키는 화살표 + 단계
+      installSteps.innerHTML = stepHtml([
+        "화면 <b>하단 가운데 '공유' 버튼</b>(⬆️ 네모 아이콘)을 눌러요",
+        "메뉴를 내려서 <b>'홈 화면에 추가'</b>를 눌러요",
+        "오른쪽 위 <b>'추가'</b>를 누르면 끝!"
+      ]);
+      installArrow.classList.remove("hidden"); // 하단 공유버튼 방향 화살표
+    } else if(isAndroid){
+      installSteps.innerHTML = stepHtml([
+        "브라우저 <b>오른쪽 위 ⋮ 메뉴</b>를 눌러요",
+        "<b>'홈 화면에 추가'</b> 또는 <b>'앱 설치'</b>를 눌러요"
+      ]);
+    } else {
+      installSteps.innerHTML = stepHtml([
+        "브라우저 메뉴에서 <b>'홈 화면에 추가'</b> 또는 <b>'앱 설치'</b>를 선택해주세요"
+      ]);
     }
-    if(isInAppBrowser()){
-      const ok = confirm("지금은 다른 앱(카톡 등) 안의 브라우저라 홈 화면 추가가 안 돼요.\n\n주소를 복사해서 사파리/크롬에 붙여넣어 열면 추가할 수 있어요. 주소를 복사할까요?");
-      if(ok){
-        const url = location.href.split("?")[0];
-        navigator.clipboard?.writeText(url)
-          .then(() => alert("주소가 복사됐어요!\n사파리/크롬 주소창에 붙여넣어 열어주세요."))
-          .catch(() => alert("주소: " + url));
-      }
-      return;
-    }
+    installGuide.classList.remove("hidden");
+  }
+
+  installCopyUrl.addEventListener("click", () => {
+    const url = installCopyUrl.dataset.url || location.href.split("?")[0];
+    navigator.clipboard?.writeText(url)
+      .then(() => { installCopyUrl.textContent = "복사됨 ✓ 사파리에 붙여넣으세요"; })
+      .catch(() => { alert("주소: " + url); });
+  });
+  installPrimary.addEventListener("click", () => {
     if(deferredInstallPrompt){
       deferredInstallPrompt.prompt();
-      return;
+      deferredInstallPrompt.userChoice && deferredInstallPrompt.userChoice.finally(() => closeInstallGuide());
+      deferredInstallPrompt = null;
     }
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    alert(isIOS
-      ? "홈 화면에 추가하기 (사파리):\n\n1) 화면 하단 가운데 '공유' 버튼(⬆️네모) 탭\n2) 메뉴에서 '홈 화면에 추가' 탭\n3) 오른쪽 위 '추가' 탭"
-      : "브라우저 메뉴(⋮)에서 '홈 화면에 추가' 또는 '앱 설치'를 선택해주세요.");
   });
+
+  $("#btnAddHome").addEventListener("click", openInstallGuide);
 
   // ---------- 초기화 ----------
   load();
