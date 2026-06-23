@@ -1,29 +1,17 @@
-const CACHE_NAME = "nbbang-v2";
+// network-only 서비스워커: 캐시를 전혀 하지 않음 (항상 최신 코드).
+// 구버전이 캐시되어 사용자가 옛 화면을 보는 문제를 원천 차단.
+const CACHE_NAME = "nbbang-v3-nocache";
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", () => {
   self.skipWaiting();
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(["./", "./index.html"]))
-  );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k)))) // 기존 캐시 전부 삭제
+      .then(() => self.clients.claim())
   );
 });
 
-// network-first: 항상 최신 버전을 우선 받아오고, 오프라인일 때만 캐시로 대체
-self.addEventListener("fetch", (event) => {
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return response;
-      })
-      .catch(() => caches.match(event.request))
-  );
-});
+// fetch 핸들러에서 respondWith를 호출하지 않음 → 브라우저 기본 네트워크 요청 사용 (캐시 없음)
