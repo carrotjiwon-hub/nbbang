@@ -816,41 +816,33 @@
     return total;
   }
 
-  // 인식된 품목들을 맥주/소주/식사로 분류·합산해서 현재 회차의 항목에 채움. 결과 요약 문자열 반환
+  // 핵심: 맥주·소주만 정확히 찾고, 식사 = 영수증 총액 − 맥주 − 소주 (나머지는 전부 식사)
   function applyReceiptToRound(parsedItems, receiptTotal){
     const round = getActiveRound();
-    round.ocrCheck = null; // 이전 검증결과 초기화
-    if(!parsedItems || parsedItems.length === 0){
-      return "인식된 품목이 없어요. 다음 화면에서 직접 입력해주세요.";
+    round.ocrCheck = null;
+
+    // 총액을 못 읽으면 자동입력 불가 (뺄셈의 기준이 없음)
+    if(!receiptTotal || receiptTotal <= 0){
+      return "영수증 총액을 읽지 못했어요. 다음 화면에서 직접 입력해주세요.";
     }
-    let mealTotal = 0;
+
+    // 맥주/소주만 합산 (식사는 합산하지 않음)
     const beer = { qty: 0, amt: 0 };
     const soju = { qty: 0, amt: 0 };
-
-    parsedItems.forEach((it) => {
+    (parsedItems || []).forEach((it) => {
       const cat = classifyReceiptName(it.name);
       if(cat === "맥주"){ beer.qty += it.qty; beer.amt += it.lineTotal; }
       else if(cat === "소주"){ soju.qty += it.qty; soju.amt += it.lineTotal; }
-      else { mealTotal += it.lineTotal; }
     });
 
-    const classifiedSum = mealTotal + beer.amt + soju.amt;
-
-    // ── 신뢰 게이트: 분류합계가 영수증 총액과 일치할 때만 자동입력 (틀린 금액 방지) ──
-    const tolerance = Math.max(100, Math.round((receiptTotal || classifiedSum) * 0.02));
-    const verified = receiptTotal > 0 && Math.abs(classifiedSum - receiptTotal) <= tolerance;
-
-    if(!verified){
-      // 검증 실패(구겨짐/흐림 등) → 자동입력하지 않고 직접 입력 유도
-      round.ocrCheck = receiptTotal > 0
-        ? { classifiedSum, receiptTotal, ok: false, diff: classifiedSum - receiptTotal, notApplied: true }
-        : null;
-      return receiptTotal > 0
-        ? `영수증을 정확히 읽지 못했어요 (인식 ${won(classifiedSum)} ≠ 영수증 ${won(receiptTotal)}). 자동입력은 건너뛰고, 다음 화면에서 직접 입력해주세요.`
-        : "영수증을 또렷이 읽지 못했어요. 다음 화면에서 직접 입력해주세요.";
+    // 술 금액이 총액을 넘으면 인식 오류 → 자동입력 안 함
+    if(beer.amt + soju.amt > receiptTotal){
+      round.ocrCheck = { receiptTotal, classifiedSum: beer.amt + soju.amt, ok: false, notApplied: true };
+      return "술 금액이 영수증 총액보다 크게 인식됐어요(오류). 다음 화면에서 직접 입력해주세요.";
     }
 
-    // 검증 통과 → 실제로 채움
+    const mealTotal = receiptTotal - beer.amt - soju.amt; // ★ 나머지는 다 식사
+
     const allMemberIds = state.members.map((m) => m.id);
     function getOrCreate(name, mode, defPrice){
       let item = round.items.find((i) => i.name.trim() === name);
@@ -860,13 +852,12 @@
       }
       return item;
     }
-    const parts = [];
-    if(mealTotal > 0){
-      const m = getOrCreate("식사", "flat", 0);
-      m.price = mealTotal;
-      if(m.assignedTo.length === 0) m.assignedTo = [...allMemberIds];
-      parts.push(`식사 ${won(mealTotal)}`);
-    }
+
+    const m = getOrCreate("식사", "flat", 0);
+    m.price = mealTotal;
+    if(m.assignedTo.length === 0) m.assignedTo = [...allMemberIds];
+
+    const parts = [`식사 ${won(mealTotal)}`];
     if(beer.amt > 0){
       const b = getOrCreate("맥주", "perPerson", 5000);
       if(beer.qty > 0) b.price = Math.round(beer.amt / beer.qty);
@@ -879,8 +870,12 @@
       s.receiptQty = soju.qty; s.receiptAmt = soju.amt;
       parts.push(`소주 ${soju.qty}병(병당 ${won(s.price)})`);
     }
-    round.ocrCheck = { classifiedSum, receiptTotal, ok: true, diff: classifiedSum - receiptTotal };
-    return `✅ 인식 완료! ${parts.join(" · ")} — 영수증 총액과 일치해요. 누가 몇 잔/병인지는 다음 화면에서 입력해주세요.`;
+
+    round.ocrCheck = { receiptTotal, classifiedSum: receiptTotal, ok: true };
+    const noAlcohol = (beer.amt === 0 && soju.amt === 0);
+    return noAlcohol
+      ? `✅ 총액 ${won(receiptTotal)}을 전부 식사로 넣었어요. 맥주·소주가 있었으면 다음 화면에서 직접 옮겨주세요.`
+      : `✅ 인식 완료! ${parts.join(" · ")} (식사 = 총액 − 술). 누가 몇 잔/병인지는 다음 화면에서!`;
   }
 
   // 디버그(?debug=1): OCR 원문을 복사 가능한 형태로 보여줌 (파싱 튜닝용)
