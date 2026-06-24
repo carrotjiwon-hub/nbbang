@@ -8,6 +8,7 @@
 <link rel="icon" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js"></script>
 <style>
   :root{
     --toss-blue:#3182f6;
@@ -1313,6 +1314,7 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
+          ${isDebugMode() ? `<button class="kakaoOneBtn chip" data-id="${m.id}" style="border-color:#fee500;background:#fee500;color:#191600">💬 카톡</button>` : ""}
           <button class="copyOneBtn chip" data-id="${m.id}">복사</button>
           <button class="paidBtn chip ${paid ? "selected" : ""}" data-id="${m.id}" style="${paid ? "background:#00c781;border-color:#00c781;color:#fff" : ""}">${paid ? "완료 ✓" : "입금완료"}</button>
         </div>
@@ -1321,6 +1323,7 @@
     });
 
     $$(".copyOneBtn").forEach((btn) => btn.addEventListener("click", () => copyIndividualMessage(btn.dataset.id)));
+    $$(".kakaoOneBtn").forEach((btn) => btn.addEventListener("click", () => kakaoShareText(individualMessageText(btn.dataset.id))));
     $$(".paidBtn").forEach((btn) => btn.addEventListener("click", () => {
       if(!state.paidStatus) state.paidStatus = {};
       state.paidStatus[btn.dataset.id] = !state.paidStatus[btn.dataset.id];
@@ -1366,8 +1369,35 @@
   }
 
   $("#btnCopyAll").addEventListener("click", copyAllSettlementMessage);
+  // 디버그 모드: 전체 카톡 공유 버튼 추가 (300명에겐 안 보임)
+  if(isDebugMode()){
+    const kb = document.createElement("button");
+    kb.textContent = "💬 전체 카톡 공유 (디버그)";
+    kb.className = "w-full py-3 text-[14px] font-semibold rounded-[14px] mt-2";
+    kb.style.cssText = "background:#fee500;color:#191600";
+    kb.addEventListener("click", () => kakaoShareText(allSettlementMessageText()));
+    $("#btnCopyAll").parentElement.appendChild(kb);
+  }
 
-  // 카카오톡 공유는 도메인 등록(제품 링크 관리) 완료 전까지 비활성화 — 현재는 복사 기능만 사용
+  // ---------- 카카오톡 공유 (도메인 등록 후 동작, 디버그에서 테스트) ----------
+  const KAKAO_JS_KEY = "120bba31c77d884ae0265cf150b20f75";
+  try{ if(window.Kakao && !window.Kakao.isInitialized()) window.Kakao.init(KAKAO_JS_KEY); }catch(e){}
+
+  function kakaoShareText(text){
+    if(!window.Kakao || !window.Kakao.isInitialized()){
+      copyToClipboard(text, "카카오 SDK 미로드 — 메시지를 복사했어요.");
+      return;
+    }
+    try{
+      window.Kakao.Share.sendDefault({
+        objectType: "text",
+        text,
+        link: { mobileWebUrl: location.origin + location.pathname, webUrl: location.origin + location.pathname }
+      });
+    } catch(err){
+      copyToClipboard(text, "카카오 공유 실패(" + (err && err.message ? err.message : err) + ") — 메시지를 복사했어요.");
+    }
+  }
 
   // ====================================================
   // 하단 고정 버튼 흐름 제어
