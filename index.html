@@ -617,12 +617,13 @@
   let lastOcrText = "";
 
   // 디버그 모드: ?debug=1 또는 #debug 로 한 번 들어오면 기억(localStorage). ?debug=0 으로 끄기
+  // 디버그는 '현재 URL에 ?debug 또는 #debug가 있을 때만' 켜짐 (저장/기억 안 함)
   function isDebugMode(){
     const q = (location.search + location.hash).toLowerCase();
-    if(/debug=?0\b/.test(q)){ try{ localStorage.removeItem("nbbang_debug"); }catch(e){} return false; }
-    if(q.includes("debug")){ try{ localStorage.setItem("nbbang_debug", "1"); }catch(e){} return true; }
-    try{ return localStorage.getItem("nbbang_debug") === "1"; }catch(e){ return false; }
+    return q.includes("debug") && !/debug=?0\b/.test(q);
   }
+  // 과거에 저장됐던 디버그 플래그 정리 (예전 버전 흔적 제거)
+  try{ localStorage.removeItem("nbbang_debug"); }catch(e){}
 
   const receiptDropZone = $("#receiptDropZone");
   const receiptInput = $("#receiptInput");
